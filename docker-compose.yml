@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  # Database Service: PostgreSQL (Emulating Supabase locally)
+  db:
+    image: postgres:15-alpine
+    container_name: pharmacy_db
+    restart: always
+    environment:
+      POSTGRES_DB: pharmacy_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: rootpassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pharmacy_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Backend Service: .NET API
+  api:
+    build:
+      context: .
+      dockerfile: src/Pharmacy.Api/Dockerfile
+    container_name: pharmacy_api
+    restart: always
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - ASPNETCORE_URLS=http://+:80
+      - ConnectionStrings__DefaultConnection=Host=db;Port=5432;Database=pharmacy_db;Username=postgres;Password=rootpassword
+    ports:
+      - "5227:80"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend Service: Angular client
+  client:
+    build:
+      context: ./src/Pharmacy.Client
+      dockerfile: Dockerfile
+    container_name: pharmacy_client
+    restart: always
+    ports:
+      - "4200:80"
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
