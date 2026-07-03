@@ -10,7 +10,7 @@ WORKDIR /app
 # Copy dependency configs first to leverage Docker caching
 COPY src/Pharmacy.Client/package*.json ./src/Pharmacy.Client/
 WORKDIR /app/src/Pharmacy.Client
-RUN npm ci
+RUN npm install
 
 # Copy client source code and build for production
 COPY src/Pharmacy.Client/ ./
