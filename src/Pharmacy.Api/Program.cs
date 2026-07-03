@@ -21,7 +21,7 @@ Log.Logger = new LoggerConfiguration()
     .MinimumLevel.Information()
     .Enrich.FromLogContext()
     .WriteTo.Console()
-    .WriteTo.File("logs/medicare-.log", rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
+    .WriteTo.File("logs/ttyt-saidong-.log", rollingInterval: RollingInterval.Day, outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {Message:lj}{NewLine}{Exception}")
     .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -47,9 +47,9 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 
 // Configure JWT Authentication
-var secretKey = builder.Configuration["Jwt:Key"] ?? "MedicareSuperSecretSecurityKeyThatIsAtLeast32BytesLong!";
-var issuer = builder.Configuration["Jwt:Issuer"] ?? "MedicareApi";
-var audience = builder.Configuration["Jwt:Audience"] ?? "MedicareClient";
+var secretKey = builder.Configuration["Jwt:Key"] ?? "TTYTSaiDongSuperSecretSecurityKeyThatIsAtLeast32BytesLong!";
+var issuer = builder.Configuration["Jwt:Issuer"] ?? "TTYTSaiDongApi";
+var audience = builder.Configuration["Jwt:Audience"] ?? "TTYTSaiDongClient";
 
 builder.Services.AddAuthentication(options =>
 {
@@ -109,7 +109,7 @@ using (var scope = app.Services.CreateScope())
 app.UseSwagger();
 app.UseSwaggerUI(c =>
 {
-    c.SwaggerEndpoint("/swagger/v1/swagger.json", "Medicare API v1");
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "TTYT Sai Dong API v1");
     c.RoutePrefix = "swagger"; // Available at http://localhost:<port>/swagger
 });
 

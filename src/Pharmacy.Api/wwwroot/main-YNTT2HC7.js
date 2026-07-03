@@ -1,0 +1,1 @@
+fetch("assets/config.json").then(o=>o.json()).then(o=>{window.API_BASE_URL=o.apiUrl}).catch(o=>{console.warn("Could not load assets/config.json, falling back to default API url",o),window.API_BASE_URL="http://localhost:1033"}).finally(()=>{import("./chunk-RV67WU65.js").catch(o=>console.error(o))});
