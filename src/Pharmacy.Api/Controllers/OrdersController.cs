@@ -57,6 +57,13 @@ namespace Pharmacy.Api.Controllers
             return Ok(orderDto);
         }
 
+        [HttpPost("{id}/cancel")]
+        public async Task<IActionResult> CancelOrder(Guid id)
+        {
+            await _orderService.CancelOrderAsync(id);
+            return Ok(new { message = "Hủy đơn hàng thành công và đã hoàn trả tồn kho." });
+        }
+
         private Guid GetUserId()
         {
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier);

@@ -8,6 +8,7 @@ namespace Pharmacy.Core.DTOs
         public required string FullName { get; set; }
         public required string Phone { get; set; }
         public string? AllergyNotes { get; set; }
+        public DateTime? DateOfBirth { get; set; }
     }
 
     public class CustomerDto
@@ -16,6 +17,7 @@ namespace Pharmacy.Core.DTOs
         public required string FullName { get; set; }
         public required string Phone { get; set; }
         public string? AllergyNotes { get; set; }
+        public DateTime? DateOfBirth { get; set; }
         public int RewardPoints { get; set; }
     }
 

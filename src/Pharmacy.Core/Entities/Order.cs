@@ -14,6 +14,7 @@ namespace Pharmacy.Core.Entities
         public decimal TotalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
         public required string PaymentMethod { get; set; }  // Cash, Transfer
+        public string Status { get; set; } = "Completed";  // Completed, Cancelled
 
         // National Sync Status
         public string? NationalSyncStatus { get; set; } = "Pending"; // Pending, Synced, Failed, None

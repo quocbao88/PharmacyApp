@@ -39,6 +39,7 @@ namespace Pharmacy.Core.DTOs
         public decimal TotalAmount { get; set; }
         public decimal DiscountAmount { get; set; }
         public required string PaymentMethod { get; set; }
+        public string Status { get; set; } = null!;
         public List<OrderDetailDto> Details { get; set; } = new();
 
         // National Sync Info
@@ -84,5 +85,6 @@ namespace Pharmacy.Core.DTOs
 
         // National Sync Info
         public string? NationalSyncStatus { get; set; }
+        public string Status { get; set; } = null!;
     }
 }

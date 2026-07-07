@@ -62,6 +62,7 @@ namespace Pharmacy.Api.Controllers
                 FullName = request.FullName.Trim(),
                 Phone = request.Phone.Trim(),
                 AllergyNotes = request.AllergyNotes?.Trim(),
+                DateOfBirth = request.DateOfBirth,
                 RewardPoints = 0
             };
 
@@ -112,6 +113,7 @@ namespace Pharmacy.Api.Controllers
                 FullName = c.FullName,
                 Phone = c.Phone,
                 AllergyNotes = c.AllergyNotes,
+                DateOfBirth = c.DateOfBirth,
                 RewardPoints = c.RewardPoints
             };
         }

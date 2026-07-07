@@ -328,13 +328,17 @@ namespace Pharmacy.Infrastructure.Services
 
             if (startDate.HasValue)
             {
-                var startUtc = startDate.Value.ToUniversalTime();
+                // Set to start of the day in local time/specified kind, then to UTC
+                var startOfDay = new DateTime(startDate.Value.Year, startDate.Value.Month, startDate.Value.Day, 0, 0, 0, 0, startDate.Value.Kind);
+                var startUtc = startOfDay.ToUniversalTime();
                 query = query.Where(o => o.CreatedAt >= startUtc);
             }
 
             if (endDate.HasValue)
             {
-                var endUtc = endDate.Value.ToUniversalTime();
+                // Set to end of the day (23:59:59.999) in local time/specified kind, then to UTC
+                var endOfDay = new DateTime(endDate.Value.Year, endDate.Value.Month, endDate.Value.Day, 23, 59, 59, 999, endDate.Value.Kind);
+                var endUtc = endOfDay.ToUniversalTime();
                 query = query.Where(o => o.CreatedAt <= endUtc);
             }
 
@@ -345,6 +349,62 @@ namespace Pharmacy.Infrastructure.Services
                 dtos.Add(await MapToDtoAsync(o));
             }
             return dtos;
+        }
+
+        public async Task CancelOrderAsync(Guid orderId)
+        {
+            _logger.LogInformation("Bắt đầu thực hiện hủy đơn hàng ID: {OrderId}", orderId);
+            using var transaction = await _context.Database.BeginTransactionAsync();
+            try
+            {
+                var order = await _context.Orders
+                    .Include(o => o.Details)
+                        .ThenInclude(d => d.Batch)
+                    .Include(o => o.Customer)
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null)
+                {
+                    throw new PharmacyValidationException("Không tìm thấy đơn hàng cần hủy.");
+                }
+
+                if (order.Status == "Cancelled")
+                {
+                    throw new PharmacyValidationException("Đơn hàng này đã được hủy trước đó.");
+                }
+
+                // 1. Restore product batches stock
+                foreach (var detail in order.Details)
+                {
+                    if (detail.Batch != null)
+                    {
+                        var basicQtyToRestore = detail.Quantity * detail.ConversionValue;
+                        detail.Batch.CurrentQuantity += basicQtyToRestore;
+                        _logger.LogInformation("Hoàn lại kho sản phẩm '{ProductId}' Lô '{BatchNumber}': +{Qty} đơn vị cơ bản", detail.ProductId, detail.Batch.BatchNumber, basicQtyToRestore);
+                    }
+                }
+
+                // 2. Revert CRM reward points (10k = 1 point)
+                if (order.CustomerId.HasValue && order.Customer != null)
+                {
+                    var pointsEarned = (int)(order.TotalAmount / 10000);
+                    order.Customer.RewardPoints = Math.Max(0, order.Customer.RewardPoints - pointsEarned);
+                    _logger.LogInformation("Khách hàng '{CustomerName}' bị trừ {Points} điểm tích lũy do hủy đơn hàng.", order.Customer.FullName, pointsEarned);
+                }
+
+                // 3. Mark order status as Cancelled
+                order.Status = "Cancelled";
+
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+                _logger.LogInformation("Hủy đơn hàng {OrderCode} THÀNH CÔNG và đã hoàn lại kho thuốc.", order.OrderCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Lỗi khi hủy đơn hàng ID: {OrderId} - Thực hiện ROLLBACK.", orderId);
+                await transaction.RollbackAsync();
+                throw;
+            }
         }
 
         private Task<OrderDto> MapToDtoAsync(Order order)
@@ -363,6 +423,7 @@ namespace Pharmacy.Infrastructure.Services
                 TotalAmount = order.TotalAmount,
                 DiscountAmount = order.DiscountAmount,
                 PaymentMethod = order.PaymentMethod,
+                Status = order.Status,
                 NationalSyncStatus = order.NationalSyncStatus,
                 NationalSyncMessage = order.NationalSyncMessage,
                 NationalSyncedAt = order.NationalSyncedAt,
