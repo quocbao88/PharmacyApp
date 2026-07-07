@@ -1,1 +1,0 @@
-fetch("assets/config.json").then(o=>o.json()).then(o=>{window.API_BASE_URL=o.apiUrl}).catch(o=>{console.warn("Could not load assets/config.json, falling back to default API url",o),window.API_BASE_URL="https://pharmacyapp-oekk.onrender.com"}).finally(()=>{import("./chunk-W22X6KYG.js").catch(o=>console.error(o))});
