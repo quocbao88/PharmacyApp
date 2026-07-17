@@ -166,6 +166,9 @@ namespace Pharmacy.Infrastructure.Services
                     OrderCode = orderCode,
                     UserId = userId,
                     CustomerId = request.CustomerId,
+                    // Khách vãng lai
+                    GuestName = !request.CustomerId.HasValue ? request.GuestName : null,
+                    GuestDateOfBirth = !request.CustomerId.HasValue ? request.GuestDateOfBirth : null,
                     Notes = request.Notes,
                     CreatedAt = DateTime.UtcNow,
                     TotalAmount = totalAmount,
@@ -418,6 +421,8 @@ namespace Pharmacy.Infrastructure.Services
                 CustomerId = order.CustomerId,
                 CustomerName = order.Customer?.FullName,
                 CustomerPhone = order.Customer?.Phone,
+                GuestName = order.GuestName,
+                GuestDateOfBirth = order.GuestDateOfBirth,
                 Notes = order.Notes,
                 CreatedAt = order.CreatedAt,
                 TotalAmount = order.TotalAmount,

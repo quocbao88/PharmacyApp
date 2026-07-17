@@ -11,6 +11,10 @@ namespace Pharmacy.Core.DTOs
         public required string PaymentMethod { get; set; } // Cash, Transfer
         public List<CheckoutItemDto> Items { get; set; } = new();
 
+        // Khách vãng lai (khi không có CustomerId)
+        public string? GuestName { get; set; }             // Tên khách vãng lai
+        public string? GuestDateOfBirth { get; set; }      // Ngày sinh khách vãng lai (ISO string)
+
         // Prescription Info (Bán thuốc theo đơn)
         public string? PrescriptionCode { get; set; }       // Mã đơn thuốc quốc gia
         public string? PrescribingDoctor { get; set; }      // Bác sĩ kê đơn
@@ -32,8 +36,11 @@ namespace Pharmacy.Core.DTOs
         public Guid UserId { get; set; }
         public string? StaffName { get; set; }
         public Guid? CustomerId { get; set; }
-        public string? CustomerName { get; set; }
-        public string? CustomerPhone { get; set; }
+        public string? CustomerName { get; set; }   // Tên từ bảng Customer (CRM)
+        public string? CustomerPhone { get; set; }  // SĐT từ bảng Customer (CRM)
+        // Khách vãng lai
+        public string? GuestName { get; set; }
+        public string? GuestDateOfBirth { get; set; }
         public string? Notes { get; set; }
         public DateTime CreatedAt { get; set; }
         public decimal TotalAmount { get; set; }

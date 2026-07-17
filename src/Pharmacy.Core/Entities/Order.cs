@@ -9,6 +9,9 @@ namespace Pharmacy.Core.Entities
         public required string OrderCode { get; set; }  // Unique order code
         public Guid UserId { get; set; }                // Nhân viên tạo đơn
         public Guid? CustomerId { get; set; }
+        // Khách vãng lai (khi không có CustomerId)
+        public string? GuestName { get; set; }           // Tên khách vãng lai
+        public string? GuestDateOfBirth { get; set; }    // Ngày sinh khách vãng lai
         public string? Notes { get; set; }              // Ghi chú đơn hàng
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
         public decimal TotalAmount { get; set; }
