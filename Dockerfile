@@ -23,6 +23,15 @@ RUN dotnet publish "Pharmacy.Api.csproj" -c Release -o /app/publish /p:UseAppHos
 # Stage 2: Final runtime environment
 FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS final
 WORKDIR /app
+
+# Prevent inotify instance exhaustion on Render's free-tier Linux containers (limit: 128).
+# 1. Disable config-file reloadOnChange (the direct cause of the FileSystemWatcher crash)
+# 2. Force Production environment (disables development-mode file watchers)
+# 3. Suppress the Physical File Provider's file watching for static files
+ENV DOTNET_hostBuilder__reloadConfigOnChange=false \
+    DOTNET_ENVIRONMENT=Production \
+    ASPNETCORE_ENVIRONMENT=Production
+
 COPY --from=build /app/publish .
 
 # Render dynamically sets the PORT environment variable.
