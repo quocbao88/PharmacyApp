@@ -14,7 +14,17 @@ using System;
 using System.Text;
 using Serilog;
 
-var builder = WebApplication.CreateBuilder(args);
+// Disable config file watching to avoid hitting the inotify instance limit
+// on Linux hosts (e.g., Render free tier where the cap is 128).
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args
+});
+builder.Configuration.Sources.Clear();
+builder.Configuration
+    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: false)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: false)
+    .AddEnvironmentVariables();
 
 // Configure Serilog daily rotating logs
 Log.Logger = new LoggerConfiguration()
