@@ -41,6 +41,10 @@ namespace Pharmacy.Infrastructure.Repositories
             var todayStr = DateTime.UtcNow.ToString("yyyyMMdd");
             var prefix = $"HD-{todayStr}-";
 
+            // Serialize the daily counter until checkout commits, including sales of different products.
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT pg_advisory_xact_lock({734201}, {int.Parse(todayStr)})");
+
             var count = await _context.Orders
                 .Where(o => o.OrderCode.StartsWith(prefix))
                 .CountAsync();
@@ -61,7 +65,8 @@ namespace Pharmacy.Infrastructure.Repositories
         {
             return await _context.Orders
                 .Include(o => o.Details)
-                .Where(o => o.CreatedAt >= start && o.CreatedAt <= end)
+                .AsNoTracking()
+                .Where(o => o.CreatedAt >= start && o.CreatedAt <= end && o.Status != "Cancelled")
                 .ToListAsync();
         }
 
@@ -70,14 +75,15 @@ namespace Pharmacy.Infrastructure.Repositories
             return await _context.OrderDetails
                 .Include(d => d.Product)
                 .Include(d => d.Order)
-                .Where(d => d.Order!.CreatedAt >= start && d.Order.CreatedAt <= end)
+                .AsNoTracking()
+                .Where(d => d.Order!.CreatedAt >= start && d.Order.CreatedAt <= end && d.Order.Status != "Cancelled")
                 .GroupBy(d => new { d.ProductId, d.Product!.Name, d.Product.Unit })
                 .Select(g => new TopProductDto
                 {
                     ProductId = g.Key.ProductId,
                     ProductName = g.Key.Name,
                     Unit = g.Key.Unit,
-                    TotalQuantitySold = g.Sum(x => x.Quantity),
+                    TotalQuantitySold = g.Sum(x => x.Quantity * x.ConversionValue),
                     TotalRevenueGenerated = g.Sum(x => x.Subtotal)
                 })
                 .OrderByDescending(x => x.TotalQuantitySold)

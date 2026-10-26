@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Pharmacy.Core.DTOs;
 using Pharmacy.Core.Interfaces;
+using Pharmacy.Core.Exceptions;
 
 namespace Pharmacy.Infrastructure.Services
 {
@@ -18,6 +19,8 @@ namespace Pharmacy.Infrastructure.Services
 
         public async Task<ReportSummaryDto> GetRevenueAndProfitReportAsync(DateTime start, DateTime end)
         {
+            CheckDates(start, end);
+
             // Normalize dates to include full range and specify UTC kind for PostgreSQL compatibility
             var normalizedStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var normalizedEnd = DateTime.SpecifyKind(end.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
@@ -82,10 +85,24 @@ namespace Pharmacy.Infrastructure.Services
 
         public async Task<List<TopProductDto>> GetTopSellingProductsAsync(DateTime start, DateTime end, int limit)
         {
+            CheckDates(start, end);
+            if (limit <= 0)
+            {
+                throw new PharmacyValidationException("Số lượng sản phẩm phải lớn hơn 0.");
+            }
+
             var normalizedStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
             var normalizedEnd = DateTime.SpecifyKind(end.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
 
             return await _orderRepository.GetTopSellingProductsAsync(normalizedStart, normalizedEnd, limit);
+        }
+
+        private static void CheckDates(DateTime start, DateTime end)
+        {
+            if (start == default || end == default || start.Date > end.Date || end.Date == DateTime.MaxValue.Date)
+            {
+                throw new PharmacyValidationException("Khoảng ngày báo cáo không hợp lệ.");
+            }
         }
     }
 }

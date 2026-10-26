@@ -18,7 +18,7 @@ namespace Pharmacy.Api.Controllers
         [HttpPost]
         public IActionResult SyncOrder([FromBody] object payload)
         {
-            _logger.LogInformation("Cổng Dược Quốc gia nhận payload liên thông: {Payload}", payload?.ToString());
+            _logger.LogInformation("Cổng Dược Quốc gia mock đã nhận yêu cầu liên thông.");
             
             return Ok(new
             {

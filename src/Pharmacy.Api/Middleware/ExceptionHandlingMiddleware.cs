@@ -51,8 +51,15 @@ namespace Pharmacy.Api.Middleware
                     message = stockEx.Message;
                     break;
 
-                default:
-                    message = exception.Message; // In dev we can return exception message, in prod we can customize
+                case ShiftAlreadyOpenException:
+                case ShiftClosedException:
+                    statusCode = HttpStatusCode.Conflict;
+                    message = exception.Message;
+                    break;
+
+                case UnauthorizedAccessException:
+                    statusCode = HttpStatusCode.Unauthorized;
+                    message = "Phiên đăng nhập không hợp lệ. Vui lòng đăng nhập lại.";
                     break;
             }
 

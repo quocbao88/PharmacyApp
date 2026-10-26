@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using Pharmacy.Core.DTOs;
 using Pharmacy.Core.Interfaces;
 
@@ -24,6 +25,7 @@ namespace Pharmacy.Api.Controllers
         }
 
         [HttpPost("register")]
+        [Authorize(Roles = "Admin")]
         public async Task<IActionResult> Register([FromBody] RegisterRequest request)
         {
             await _authService.RegisterAsync(request.Username, request.Password, request.FullName, request.Role);

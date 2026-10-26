@@ -94,10 +94,11 @@ namespace Pharmacy.Infrastructure.Repositories
         }
 
         /// <summary>
-        /// Acquires a row-level lock (FOR UPDATE) on MySQL for all batches associated with the given product IDs.
-        /// Sorts product IDs beforehand to guarantee a consistent lock acquisition order and prevent circular deadlocks.
+        /// Locks PostgreSQL batches in a consistent order for sales and stock restoration.
         /// </summary>
-        public async Task<List<ProductBatch>> GetBatchesForUpdateAsync(IEnumerable<Guid> productIds)
+        public async Task<List<ProductBatch>> GetBatchesForUpdateAsync(
+            IEnumerable<Guid> productIds,
+            bool includeUnavailable = false)
         {
             var sortedIds = productIds.Distinct().OrderBy(id => id).ToArray();
             if (sortedIds.Length == 0)
@@ -105,15 +106,22 @@ namespace Pharmacy.Infrastructure.Repositories
                 return new List<ProductBatch>();
             }
 
-            // Using raw MySQL syntax with parameterized IN clause to lock lines.
-            // Exclude already empty batches to optimize lock scopes.
+            // Cancellation must also lock empty and expired batches before restoring stock.
             var parameters = sortedIds.Select((_, index) => $"{{{index}}}").ToArray();
             var inClause = string.Join(", ", parameters);
-            var query = $"SELECT * FROM product_batches WHERE product_id IN ({inClause}) AND current_quantity > 0 FOR UPDATE";
-            var paramObjects = sortedIds.Cast<object>().ToArray();
+            var query = $"SELECT id, product_id, batch_number, expiration_date, current_quantity, created_at FROM product_batches WHERE product_id IN ({inClause})";
+            var paramObjects = sortedIds.Cast<object>().ToList();
+
+            if (!includeUnavailable)
+            {
+                query += $" AND current_quantity > 0 AND expiration_date >= {{{paramObjects.Count}}}";
+                paramObjects.Add(DateTime.UtcNow.Date);
+            }
+
+            query += " ORDER BY product_id, expiration_date, id FOR UPDATE";
 
             return await _context.ProductBatches
-                .FromSqlRaw(query, paramObjects)
+                .FromSqlRaw(query, paramObjects.ToArray())
                 .ToListAsync();
         }
 

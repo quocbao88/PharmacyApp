@@ -139,16 +139,14 @@ namespace Pharmacy.Api.Controllers
             product.UpdatedAt = DateTime.UtcNow;
 
             // Update Unit Conversions
-            if (product.UnitConversions != null)
+            product.UnitConversions ??= new List<ProductUnitConversion>();
+            var existingConversions = product.UnitConversions.ToList();
+            if (existingConversions.Any())
             {
-                var existingConversions = product.UnitConversions.ToList();
-                if (existingConversions.Any())
+                _productRepository.DeleteUnitConversions(existingConversions);
+                foreach (var uc in existingConversions)
                 {
-                    _productRepository.DeleteUnitConversions(existingConversions);
-                    foreach (var uc in existingConversions)
-                    {
-                        product.UnitConversions.Remove(uc);
-                    }
+                    product.UnitConversions.Remove(uc);
                 }
             }
 
@@ -158,7 +156,7 @@ namespace Pharmacy.Api.Controllers
                 {
                     product.UnitConversions.Add(new ProductUnitConversion
                     {
-                        Id = Guid.Empty,
+                        Id = Guid.NewGuid(),
                         ProductId = product.Id,
                         UnitName = uc.UnitName,
                         ConversionValue = uc.ConversionValue,
@@ -420,6 +418,14 @@ namespace Pharmacy.Api.Controllers
             MinStockLevel = p.MinStockLevel,
             TotalStock = p.Batches.Sum(b => b.CurrentQuantity),
             UpdatedAt = p.UpdatedAt,
+            Batches = p.Batches.Select(b => new BatchDto
+            {
+                Id = b.Id,
+                ProductId = b.ProductId,
+                BatchNumber = b.BatchNumber,
+                ExpirationDate = b.ExpirationDate,
+                CurrentQuantity = b.CurrentQuantity
+            }).ToList(),
             UnitConversions = p.UnitConversions.Select(uc => new ProductUnitConversionDto
             {
                 Id = uc.Id,

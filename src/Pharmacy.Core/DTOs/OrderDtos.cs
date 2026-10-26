@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace Pharmacy.Core.DTOs
 {
@@ -7,8 +8,11 @@ namespace Pharmacy.Core.DTOs
     {
         public Guid? CustomerId { get; set; }
         public string? Notes { get; set; }
+        [Range(typeof(decimal), "0", "9999999999999999.99")]
         public decimal DiscountAmount { get; set; }
+        [Required, RegularExpression("^(Cash|Transfer)$")]
         public required string PaymentMethod { get; set; } // Cash, Transfer
+        [Required, MinLength(1)]
         public List<CheckoutItemDto> Items { get; set; } = new();
 
         // Khách vãng lai (khi không có CustomerId)
@@ -25,6 +29,7 @@ namespace Pharmacy.Core.DTOs
     public class CheckoutItemDto
     {
         public Guid ProductId { get; set; }
+        [Range(1, int.MaxValue)]
         public int Quantity { get; set; }
         public string? SoldUnit { get; set; }               // Đơn vị bán lựa chọn (e.g. Hộp, Vỉ, Viên)
     }

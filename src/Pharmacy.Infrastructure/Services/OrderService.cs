@@ -17,6 +17,8 @@ namespace Pharmacy.Infrastructure.Services
 {
     public class OrderService : IOrderService
     {
+        #region Main logic
+
         private readonly PharmacyDbContext _context;
         private readonly IOrderRepository _orderRepository;
         private readonly IProductRepository _productRepository;
@@ -45,10 +47,7 @@ namespace Pharmacy.Infrastructure.Services
 
         public async Task<OrderDto> CheckoutAsync(Guid userId, CheckoutOrderRequest request)
         {
-            if (request.Items == null || !request.Items.Any())
-            {
-                throw new PharmacyValidationException("Giỏ hàng rỗng, không thể thanh toán.");
-            }
+            CheckCheckout(request);
 
             _logger.LogInformation("Nhân viên [User: {UserId}] bắt đầu tạo đơn hàng với {Count} mặt hàng.", userId, request.Items.Count);
 
@@ -60,104 +59,31 @@ namespace Pharmacy.Infrastructure.Services
 
                 // Pessimistic locking (SELECT FOR UPDATE) to prevent concurrent stock deduction
                 var lockedBatches = await _productRepository.GetBatchesForUpdateAsync(productIds);
+                var customer = await ReadCustomerAsync(request.CustomerId);
 
                 var orderDetails = new List<OrderDetail>();
                 decimal totalBeforeDiscount = 0;
 
-                // FIFO stock deduction per item
+                // Validate and prepare every line before saving any database changes.
                 foreach (var item in request.Items)
                 {
                     var product = await _productRepository.GetByIdAsync(item.ProductId);
                     if (product == null)
+                    {
                         throw new PharmacyValidationException($"Không tìm thấy sản phẩm ID: {item.ProductId}");
-
-                    var soldUnit = item.SoldUnit ?? product.Unit;
-                    var conversionValue = 1;
-                    var unitPrice = product.SellingPrice;
-                    var costPrice = product.ImportPrice;
-
-                    if (!string.IsNullOrWhiteSpace(item.SoldUnit) && !item.SoldUnit.Equals(product.Unit, StringComparison.OrdinalIgnoreCase))
-                    {
-                        var conversion = product.UnitConversions.FirstOrDefault(uc => uc.UnitName.Equals(item.SoldUnit, StringComparison.OrdinalIgnoreCase));
-                        if (conversion != null)
-                        {
-                            conversionValue = conversion.ConversionValue;
-                            unitPrice = conversion.SellingPrice;
-                            costPrice = product.ImportPrice * conversionValue;
-                        }
                     }
 
-                    var totalBasicQtyNeeded = item.Quantity * conversionValue;
-
-                    var batches = lockedBatches
-                        .Where(b => b.ProductId == item.ProductId)
-                        .OrderBy(b => b.ExpirationDate)
-                        .ToList();
-
-                    var totalAvailableQty = batches.Sum(b => b.CurrentQuantity);
-                    if (totalAvailableQty < totalBasicQtyNeeded)
-                    {
-                        _logger.LogWarning("Không đủ tồn kho '{ProductName}': yêu cầu {Req}, khả dụng {Avail}", product.Name, totalBasicQtyNeeded, totalAvailableQty);
-                        throw new InsufficientStockException(
-                            $"Sản phẩm '{product.Name}' không đủ tồn kho. Yêu cầu: {totalBasicQtyNeeded} {product.Unit}, tồn thực tế: {totalAvailableQty} {product.Unit}."
-                        );
-                    }
-
-                    var remainingNeeded = totalBasicQtyNeeded;
-                    foreach (var batch in batches)
-                    {
-                        if (remainingNeeded <= 0) break;
-
-                        var deductQty = Math.Min(remainingNeeded, batch.CurrentQuantity);
-                        batch.CurrentQuantity -= deductQty;
-
-                        _logger.LogInformation("Khấu trừ FIFO '{ProductName}' Lô:{BatchNumber} -{Qty}{Unit}", product.Name, batch.BatchNumber, deductQty, product.Unit);
-
-                        // Determine if we can record using the selected unit (if no split or fully covers)
-                        string recordedUnit = product.Unit;
-                        int recordedConv = 1;
-                        int recordedQty = deductQty;
-                        decimal recordedUnitPrice = product.SellingPrice;
-                        decimal recordedCostPrice = product.ImportPrice;
-
-                        if (deductQty == totalBasicQtyNeeded)
-                        {
-                            recordedUnit = soldUnit;
-                            recordedConv = conversionValue;
-                            recordedQty = item.Quantity;
-                            recordedUnitPrice = unitPrice;
-                            recordedCostPrice = costPrice;
-                        }
-                        else
-                        {
-                            recordedUnit = product.Unit;
-                            recordedConv = 1;
-                            recordedQty = deductQty;
-                            recordedUnitPrice = product.SellingPrice;
-                            recordedCostPrice = product.ImportPrice;
-                        }
-
-                        remainingNeeded -= deductQty;
-
-                        var subtotal = recordedQty * recordedUnitPrice;
-                        totalBeforeDiscount += subtotal;
-
-                        orderDetails.Add(new OrderDetail
-                        {
-                            Id = Guid.NewGuid(),
-                            ProductId = product.Id,
-                            BatchId = batch.Id,
-                            Quantity = recordedQty,
-                            UnitPrice = recordedUnitPrice,
-                            CostPrice = recordedCostPrice,
-                            Subtotal = subtotal,
-                            SoldUnit = recordedUnit,
-                            ConversionValue = recordedConv
-                        });
-                    }
+                    var details = PrepareDetails(product, item, lockedBatches);
+                    orderDetails.AddRange(details);
+                    totalBeforeDiscount += details.Sum(d => d.Subtotal);
                 }
 
-                var totalAmount = Math.Max(0, totalBeforeDiscount - request.DiscountAmount);
+                if (request.DiscountAmount > totalBeforeDiscount)
+                {
+                    throw new PharmacyValidationException("Giảm giá không được vượt quá tổng tiền hàng.");
+                }
+
+                var totalAmount = totalBeforeDiscount - request.DiscountAmount;
                 var orderCode = await _orderRepository.GetNextOrderCodeAsync();
 
                 var order = new Order
@@ -166,6 +92,7 @@ namespace Pharmacy.Infrastructure.Services
                     OrderCode = orderCode,
                     UserId = userId,
                     CustomerId = request.CustomerId,
+                    Customer = customer,
                     // Khách vãng lai
                     GuestName = !request.CustomerId.HasValue ? request.GuestName : null,
                     GuestDateOfBirth = !request.CustomerId.HasValue ? request.GuestDateOfBirth : null,
@@ -183,15 +110,10 @@ namespace Pharmacy.Infrastructure.Services
                 };
 
                 // CRM reward points: 10,000 VND = 1 điểm
-                if (request.CustomerId.HasValue)
+                if (customer != null)
                 {
-                    var customer = await _customerRepository.GetByIdAsync(request.CustomerId.Value);
-                    if (customer != null)
-                    {
-                        var pointsEarned = (int)(totalAmount / 10000);
-                        customer.RewardPoints += pointsEarned;
-                        _logger.LogInformation("CRM '{CustomerName}' tích +{Points} điểm thưởng.", customer.FullName, pointsEarned);
-                    }
+                    var pointsEarned = (int)(totalAmount / 10000);
+                    customer.RewardPoints = checked(customer.RewardPoints + pointsEarned);
                 }
 
                 await _orderRepository.AddAsync(order);
@@ -214,7 +136,9 @@ namespace Pharmacy.Infrastructure.Services
         {
             var order = await _orderRepository.GetByIdAsync(id);
             if (order == null)
+            {
                 throw new PharmacyValidationException("Không tìm thấy đơn hàng.");
+            }
 
             return await MapToDtoAsync(order);
         }
@@ -223,7 +147,14 @@ namespace Pharmacy.Infrastructure.Services
         {
             var order = await _orderRepository.GetByIdAsync(orderId);
             if (order == null)
+            {
                 throw new PharmacyValidationException("Không tìm thấy đơn hàng.");
+            }
+
+            if (order.Status == "Cancelled")
+            {
+                throw new PharmacyValidationException("Không thể liên thông đơn hàng đã hủy.");
+            }
 
             _logger.LogInformation("Bắt đầu liên thông đơn hàng {OrderCode} lên Cổng Dược Quốc gia.", order.OrderCode);
 
@@ -234,7 +165,7 @@ namespace Pharmacy.Infrastructure.Services
                 SoHoaDon = order.OrderCode,
                 NgayBan = order.CreatedAt.ToString("o"),
                 NguoiBan = order.User?.FullName ?? "Nhân viên hệ thống",
-                KhachHang = order.Customer?.FullName ?? "Khách vãng lai",
+                KhachHang = order.Customer?.FullName ?? order.GuestName ?? "Khách vãng lai",
                 SoDienThoai = order.Customer?.Phone ?? "",
                 TongTien = order.TotalAmount,
                 GiamGia = order.DiscountAmount,
@@ -257,13 +188,22 @@ namespace Pharmacy.Infrastructure.Services
             try
             {
                 var client = _httpClientFactory.CreateClient();
-                var targetUrl = "http://localhost:1033/api/national-portal-mock";
+                var targetUrl = _configuration["NationalPortal:Url"] ?? "http://localhost:1033/api/national-portal-mock";
                 _logger.LogInformation("Gửi request POST tới URL liên thông: {Url}", targetUrl);
 
-                var response = await client.PostAsJsonAsync(targetUrl, syncPayload);
+                using var response = await client.PostAsJsonAsync(targetUrl, syncPayload);
                 if (response.IsSuccessStatusCode)
                 {
                     var result = await response.Content.ReadFromJsonAsync<SyncResponse>();
+                    if (result == null || !result.Success)
+                    {
+                        order.NationalSyncStatus = "Failed";
+                        order.NationalSyncMessage = result?.Message ?? "Cổng liên thông không xác nhận thành công.";
+                        order.NationalSyncedAt = DateTime.UtcNow;
+                        await _orderRepository.SaveChangesAsync();
+                        return await MapToDtoAsync(order);
+                    }
+
                     order.NationalSyncStatus = "Synced";
                     order.NationalSyncMessage = $"Liên thông thành công. Mã GD: {result?.TransactionId}. {result?.Message}";
                     order.NationalSyncedAt = DateTime.UtcNow;
@@ -290,15 +230,13 @@ namespace Pharmacy.Infrastructure.Services
             return await MapToDtoAsync(order);
         }
 
-        private class SyncResponse
-        {
-            public bool Success { get; set; }
-            public string? TransactionId { get; set; }
-            public string? Message { get; set; }
-        }
-
         public async Task<List<OrderDto>> GetRecentOrdersAsync(int limit)
         {
+            if (limit <= 0)
+            {
+                throw new PharmacyValidationException("Số lượng đơn hàng phải lớn hơn 0.");
+            }
+
             var orders = await _context.Orders
                 .Include(o => o.User)
                 .Include(o => o.Customer)
@@ -320,6 +258,11 @@ namespace Pharmacy.Infrastructure.Services
 
         public async Task<List<OrderDto>> GetOrdersAsync(DateTime? startDate, DateTime? endDate)
         {
+            if (startDate.HasValue && endDate.HasValue && startDate.Value.Date > endDate.Value.Date)
+            {
+                throw new PharmacyValidationException("Ngày bắt đầu không được sau ngày kết thúc.");
+            }
+
             var query = _context.Orders
                 .Include(o => o.User)
                 .Include(o => o.Customer)
@@ -360,10 +303,12 @@ namespace Pharmacy.Infrastructure.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                // Lock the order before checking status so two cancellations cannot restore it twice.
+                await _context.Database.ExecuteSqlInterpolatedAsync(
+                    $"SELECT id FROM orders WHERE id = {orderId} FOR UPDATE");
+
                 var order = await _context.Orders
                     .Include(o => o.Details)
-                        .ThenInclude(d => d.Batch)
-                    .Include(o => o.Customer)
                     .FirstOrDefaultAsync(o => o.Id == orderId);
 
                 if (order == null)
@@ -376,23 +321,29 @@ namespace Pharmacy.Infrastructure.Services
                     throw new PharmacyValidationException("Đơn hàng này đã được hủy trước đó.");
                 }
 
-                // 1. Restore product batches stock
+                // Use the same batch lock order as checkout, including unavailable batches.
+                var productIds = order.Details.Select(d => d.ProductId).Distinct();
+                var batches = await _productRepository.GetBatchesForUpdateAsync(productIds, includeUnavailable: true);
+                var batchMap = batches.ToDictionary(b => b.Id);
+                var customer = await ReadCustomerAsync(order.CustomerId);
+
+                // 1. Restore product batches stock.
                 foreach (var detail in order.Details)
                 {
-                    if (detail.Batch != null)
+                    if (!batchMap.TryGetValue(detail.BatchId, out var batch))
                     {
-                        var basicQtyToRestore = detail.Quantity * detail.ConversionValue;
-                        detail.Batch.CurrentQuantity += basicQtyToRestore;
-                        _logger.LogInformation("Hoàn lại kho sản phẩm '{ProductId}' Lô '{BatchNumber}': +{Qty} đơn vị cơ bản", detail.ProductId, detail.Batch.BatchNumber, basicQtyToRestore);
+                        throw new PharmacyValidationException("Không tìm thấy lô hàng cần hoàn kho.");
                     }
+
+                    var basicQtyToRestore = checked(detail.Quantity * detail.ConversionValue);
+                    batch.CurrentQuantity = checked(batch.CurrentQuantity + basicQtyToRestore);
                 }
 
                 // 2. Revert CRM reward points (10k = 1 point)
-                if (order.CustomerId.HasValue && order.Customer != null)
+                if (customer != null)
                 {
                     var pointsEarned = (int)(order.TotalAmount / 10000);
-                    order.Customer.RewardPoints = Math.Max(0, order.Customer.RewardPoints - pointsEarned);
-                    _logger.LogInformation("Khách hàng '{CustomerName}' bị trừ {Points} điểm tích lũy do hủy đơn hàng.", order.Customer.FullName, pointsEarned);
+                    customer.RewardPoints = Math.Max(0, customer.RewardPoints - pointsEarned);
                 }
 
                 // 3. Mark order status as Cancelled
@@ -408,6 +359,151 @@ namespace Pharmacy.Infrastructure.Services
                 await transaction.RollbackAsync();
                 throw;
             }
+        }
+
+        #endregion
+
+        #region Helpers
+
+        private static void CheckCheckout(CheckoutOrderRequest request)
+        {
+            if (request.Items == null || request.Items.Count == 0)
+            {
+                throw new PharmacyValidationException("Giỏ hàng rỗng, không thể thanh toán.");
+            }
+
+            if (request.Items.Any(i => i == null || i.ProductId == Guid.Empty || i.Quantity <= 0))
+            {
+                throw new PharmacyValidationException("Sản phẩm không hợp lệ hoặc số lượng phải lớn hơn 0.");
+            }
+
+            if (request.DiscountAmount < 0)
+            {
+                throw new PharmacyValidationException("Giảm giá không được âm.");
+            }
+
+            if (request.PaymentMethod != "Cash" && request.PaymentMethod != "Transfer")
+            {
+                throw new PharmacyValidationException("Hình thức thanh toán không hợp lệ.");
+            }
+        }
+
+        private async Task<Customer?> ReadCustomerAsync(Guid? customerId)
+        {
+            if (!customerId.HasValue)
+            {
+                return null;
+            }
+
+            // Serialize reward updates before reading the balance to avoid lost points.
+            await _context.Database.ExecuteSqlInterpolatedAsync(
+                $"SELECT id FROM customers WHERE id = {customerId.Value} FOR UPDATE");
+
+            var customer = await _customerRepository.GetByIdAsync(customerId.Value);
+            if (customer == null)
+            {
+                throw new PharmacyValidationException("Không tìm thấy khách hàng.");
+            }
+
+            return customer;
+        }
+
+        private static List<OrderDetail> PrepareDetails(
+            Product product,
+            CheckoutItemDto item,
+            List<ProductBatch> lockedBatches)
+        {
+            var soldUnit = product.Unit;
+            var conversionValue = 1;
+            var unitPrice = product.SellingPrice;
+
+            if (!string.IsNullOrWhiteSpace(item.SoldUnit) &&
+                !item.SoldUnit.Equals(product.Unit, StringComparison.OrdinalIgnoreCase))
+            {
+                var conversion = product.UnitConversions.FirstOrDefault(
+                    u => u.UnitName.Equals(item.SoldUnit, StringComparison.OrdinalIgnoreCase));
+                if (conversion == null)
+                {
+                    throw new PharmacyValidationException($"Đơn vị bán của '{product.Name}' không hợp lệ.");
+                }
+
+                soldUnit = conversion.UnitName;
+                conversionValue = conversion.ConversionValue;
+                unitPrice = conversion.SellingPrice;
+            }
+
+            if (conversionValue <= 0 || unitPrice < 0 || product.ImportPrice < 0 ||
+                item.Quantity > int.MaxValue / conversionValue)
+            {
+                throw new PharmacyValidationException("Số lượng, giá hoặc hệ số quy đổi không hợp lệ.");
+            }
+
+            var totalBasicQuantity = item.Quantity * conversionValue;
+            var batches = lockedBatches
+                .Where(b => b.ProductId == product.Id && b.CurrentQuantity > 0 &&
+                    b.ExpirationDate >= DateTime.UtcNow.Date)
+                .OrderBy(b => b.ExpirationDate)
+                .ThenBy(b => b.Id)
+                .ToList();
+
+            if (batches.Sum(b => (long)b.CurrentQuantity) < totalBasicQuantity)
+            {
+                throw new InsufficientStockException($"Sản phẩm '{product.Name}' không đủ tồn kho còn hạn sử dụng.");
+            }
+
+            var details = new List<OrderDetail>();
+            var remainingQuantity = totalBasicQuantity;
+            var lineTotal = item.Quantity * unitPrice;
+            var remainingAmount = lineTotal;
+
+            foreach (var batch in batches)
+            {
+                if (remainingQuantity == 0)
+                {
+                    break;
+                }
+
+                var quantity = Math.Min(remainingQuantity, batch.CurrentQuantity);
+                var detail = new OrderDetail
+                {
+                    Id = Guid.NewGuid(),
+                    ProductId = product.Id,
+                    Product = product,
+                    BatchId = batch.Id,
+                    Batch = batch,
+                    Quantity = quantity,
+                    UnitPrice = decimal.Round(unitPrice / conversionValue, 2, MidpointRounding.AwayFromZero),
+                    CostPrice = product.ImportPrice,
+                    SoldUnit = product.Unit,
+                    ConversionValue = 1
+                };
+
+                if (quantity == totalBasicQuantity)
+                {
+                    detail.Quantity = item.Quantity;
+                    detail.UnitPrice = unitPrice;
+                    detail.CostPrice = product.ImportPrice * conversionValue;
+                    detail.SoldUnit = soldUnit;
+                    detail.ConversionValue = conversionValue;
+                }
+
+                // Split at the selected unit's price, assigning the rounding remainder to the last batch.
+                var allocatedQuantity = totalBasicQuantity - remainingQuantity + quantity;
+                var allocatedAmount = decimal.Round(lineTotal * allocatedQuantity / totalBasicQuantity, 2, MidpointRounding.AwayFromZero);
+                var subtotal = allocatedAmount - (lineTotal - remainingAmount);
+                if (quantity == remainingQuantity)
+                {
+                    subtotal = remainingAmount;
+                }
+
+                detail.Subtotal = subtotal;
+                remainingAmount -= subtotal;
+                remainingQuantity -= quantity;
+                batch.CurrentQuantity -= quantity;
+                details.Add(detail);
+            }
+
+            return details;
         }
 
         private Task<OrderDto> MapToDtoAsync(Order order)
@@ -454,5 +550,18 @@ namespace Pharmacy.Infrastructure.Services
             };
             return Task.FromResult(dto);
         }
+
+        #endregion
+
+        #region Models
+
+        private class SyncResponse
+        {
+            public bool Success { get; set; }
+            public string? TransactionId { get; set; }
+            public string? Message { get; set; }
+        }
+
+        #endregion
     }
 }

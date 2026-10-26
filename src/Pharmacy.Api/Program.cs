@@ -10,6 +10,7 @@ using Pharmacy.Core.Interfaces;
 using Pharmacy.Infrastructure.Data;
 using Pharmacy.Infrastructure.Repositories;
 using Pharmacy.Infrastructure.Services;
+using Pharmacy.Infrastructure.Settings;
 using System;
 using System.Text;
 using Serilog;
@@ -40,16 +41,16 @@ builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddScoped<IProductRepository, ProductRepository>();
 builder.Services.AddScoped<ICustomerRepository, CustomerRepository>();
 builder.Services.AddScoped<IOrderRepository, OrderRepository>();
+builder.Services.AddScoped<IShiftRepository, ShiftRepository>();
 
 // Register Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReportService, ReportService>();
+builder.Services.AddScoped<IShiftService, ShiftService>();
 
 // Configure JWT Authentication
-var secretKey = builder.Configuration["Jwt:Key"] ?? "TTYTSaiDongSuperSecretSecurityKeyThatIsAtLeast32BytesLong!";
-var issuer = builder.Configuration["Jwt:Issuer"] ?? "TTYTSaiDongApi";
-var audience = builder.Configuration["Jwt:Audience"] ?? "TTYTSaiDongClient";
+var jwt = JwtSettings.Read(builder.Configuration);
 
 builder.Services.AddAuthentication(options =>
 {
@@ -64,9 +65,9 @@ builder.Services.AddAuthentication(options =>
         ValidateAudience = true,
         ValidateLifetime = true,
         ValidateIssuerSigningKey = true,
-        ValidIssuer = issuer,
-        ValidAudience = audience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey)),
+        ValidIssuer = jwt.Issuer,
+        ValidAudience = jwt.Audience,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwt.Key)),
         ClockSkew = TimeSpan.Zero
     };
 });

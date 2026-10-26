@@ -22,7 +22,7 @@ namespace Pharmacy.Core.Interfaces
         void DeleteBatch(ProductBatch batch);
         
         // Locking batches to prevent deadlocks and resolve concurrency
-        Task<List<ProductBatch>> GetBatchesForUpdateAsync(IEnumerable<Guid> productIds);
+        Task<List<ProductBatch>> GetBatchesForUpdateAsync(IEnumerable<Guid> productIds, bool includeUnavailable = false);
         
         // Smart alerts
         Task<List<Product>> GetLowStockProductsAsync();

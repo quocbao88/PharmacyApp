@@ -10,6 +10,7 @@ using Pharmacy.Core.DTOs;
 using Pharmacy.Core.Entities;
 using Pharmacy.Core.Exceptions;
 using Pharmacy.Core.Interfaces;
+using Pharmacy.Infrastructure.Settings;
 
 namespace Pharmacy.Infrastructure.Services
 {
@@ -80,12 +81,8 @@ namespace Pharmacy.Infrastructure.Services
         {
             var tokenHandler = new JwtSecurityTokenHandler();
             
-            // Fallback key if configuration is missing (for developer ease)
-            var secretKey = _configuration["Jwt:Key"] ?? "MedicareSuperSecretSecurityKeyThatIsAtLeast32BytesLong!";
-            var issuer = _configuration["Jwt:Issuer"] ?? "MedicareApi";
-            var audience = _configuration["Jwt:Audience"] ?? "MedicareClient";
-
-            var key = Encoding.ASCII.GetBytes(secretKey);
+            var jwt = JwtSettings.Read(_configuration);
+            var key = Encoding.UTF8.GetBytes(jwt.Key);
 
             var tokenDescriptor = new SecurityTokenDescriptor
             {
@@ -97,8 +94,8 @@ namespace Pharmacy.Infrastructure.Services
                     new Claim("username", user.Username)
                 }),
                 Expires = DateTime.UtcNow.AddDays(1), // Token valid for 1 day
-                Issuer = issuer,
-                Audience = audience,
+                Issuer = jwt.Issuer,
+                Audience = jwt.Audience,
                 SigningCredentials = new SigningCredentials(new SymmetricSecurityKey(key), SecurityAlgorithms.HmacSha256Signature)
             };
 
