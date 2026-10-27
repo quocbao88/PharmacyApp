@@ -1,6 +1,8 @@
 # Base stage: official ASP.NET Core runtime image for Linux
-FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS base
+FROM mcr.microsoft.com/dotnet/aspnet:6.0-jammy AS base
 WORKDIR /app
+COPY deploy/install-postgresql-client.sh /tmp/install-postgresql-client.sh
+RUN sh /tmp/install-postgresql-client.sh && rm /tmp/install-postgresql-client.sh
 EXPOSE 80
 
 # Build stage: official .NET SDK image

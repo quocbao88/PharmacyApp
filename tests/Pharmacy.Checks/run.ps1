@@ -24,6 +24,7 @@ try {
 
     Push-Location $workspace
     try {
+        $env:PHARMACY_TEST_PG_BIN = $PostgresBin
         dotnet run --project tests/Pharmacy.Checks/Pharmacy.Checks.csproj --nologo
         if ($LASTEXITCODE -ne 0) { throw 'Inventory integration checks failed.' }
     }

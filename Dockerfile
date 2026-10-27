@@ -21,8 +21,10 @@ WORKDIR "/src/src/Pharmacy.Api"
 RUN dotnet publish "Pharmacy.Api.csproj" -c Release -o /app/publish /p:UseAppHost=false
 
 # Stage 2: Final runtime environment
-FROM mcr.microsoft.com/dotnet/aspnet:6.0 AS final
+FROM mcr.microsoft.com/dotnet/aspnet:6.0-jammy AS final
 WORKDIR /app
+COPY deploy/install-postgresql-client.sh /tmp/install-postgresql-client.sh
+RUN sh /tmp/install-postgresql-client.sh && rm /tmp/install-postgresql-client.sh
 
 # Prevent inotify instance exhaustion on Render's free-tier Linux containers (limit: 128).
 # 1. Disable config-file reloadOnChange (the direct cause of the FileSystemWatcher crash)

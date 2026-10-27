@@ -229,6 +229,110 @@ await using (var context = Open())
     Check((await service.GetHistoryAsync(batchId)).Count >= 7, "Lot history includes every stock and return event");
     Check(await context.Orders.Select(x => x.OrderCode).Distinct().CountAsync() == await context.Orders.CountAsync(), "Concurrent invoices have unique codes");
 }
+// Export and restore only into another newly-created database on the loopback test cluster.
+var pgBin = Environment.GetEnvironmentVariable("PHARMACY_TEST_PG_BIN") ?? "C:/Program Files/PostgreSQL/18/bin";
+var backupConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+{
+    ["ConnectionStrings:DefaultConnection"] = connectionString,
+    ["Backup:PgDumpPath"] = Path.Combine(pgBin, "pg_dump.exe")
+}).Build();
+var backupService = new DatabaseBackupService(backupConfiguration, NullLogger<DatabaseBackupService>.Instance);
+var backupPath = Path.Combine(Path.GetTempPath(), "pharmacy-check-" + Guid.NewGuid().ToString("N") + ".dump");
+var restoreListPath = backupPath + ".list";
+try
+{
+    await using (var backup = await backupService.ExportAsync(CancellationToken.None))
+    {
+        var signature = new byte[5];
+        var bytesRead = await backup.ReadAsync(signature);
+        Check(bytesRead == signature.Length, "Backup archive header is complete");
+        Check(System.Text.Encoding.ASCII.GetString(signature) == "PGDMP", "Backup has a PostgreSQL custom archive signature");
+        backup.Position = 0;
+        await using var file = File.Create(backupPath);
+        await backup.CopyToAsync(file);
+    }
+    var restoredName = "pharmacy_restore_" + Guid.NewGuid().ToString("N");
+    await using (var connection = new NpgsqlConnection(server))
+    {
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("CREATE DATABASE " + restoredName, connection);
+        await command.ExecuteNonQueryAsync();
+    }
+    var start = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = Path.Combine(pgBin, "pg_restore.exe"),
+        UseShellExecute = false,
+        RedirectStandardError = true
+    };
+    // A fresh PostgreSQL database already has public; skip only its CREATE SCHEMA entry.
+    var listStart = new System.Diagnostics.ProcessStartInfo
+    {
+        FileName = start.FileName,
+        UseShellExecute = false,
+        RedirectStandardOutput = true
+    };
+    listStart.ArgumentList.Add("--list");
+    listStart.ArgumentList.Add(backupPath);
+    using (var listing = System.Diagnostics.Process.Start(listStart)!)
+    {
+        var list = await listing.StandardOutput.ReadToEndAsync();
+        await listing.WaitForExitAsync();
+        Check(listing.ExitCode == 0, "Backup archive inventory is readable");
+        await File.WriteAllLinesAsync(restoreListPath, list.Split('\n').Where(line =>
+            !System.Text.RegularExpressions.Regex.IsMatch(line, @"^\d+; \d+ \d+ SCHEMA - public ")));
+    }
+    foreach (var argument in new[] { "--exit-on-error", "--no-owner", "--no-acl", "--use-list", restoreListPath, "--dbname", restoredName, backupPath })
+    {
+        start.ArgumentList.Add(argument);
+    }
+    start.Environment["PGHOST"] = "127.0.0.1";
+    start.Environment["PGPORT"] = "55439";
+    start.Environment["PGUSER"] = "pharmacy_test";
+    using var restore = System.Diagnostics.Process.Start(start)!;
+    var restoreErrors = restore.StandardError.ReadToEndAsync();
+    await restore.WaitForExitAsync();
+    var restoreMessage = await restoreErrors;
+    Check(restore.ExitCode == 0, "Backup restores into an empty database without errors: " + restoreMessage);
+
+    await using var original = new NpgsqlConnection(connectionString);
+    await using var restored = new NpgsqlConnection(new NpgsqlConnectionStringBuilder(server) { Database = restoredName }.ConnectionString);
+    await original.OpenAsync();
+    await restored.OpenAsync();
+    var tables = new List<string>();
+    await using (var command = new NpgsqlCommand("SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename", original))
+    await using (var reader = await command.ExecuteReaderAsync())
+    {
+        while (await reader.ReadAsync())
+        {
+            tables.Add(reader.GetString(0));
+        }
+    }
+    foreach (var table in tables)
+    {
+        var quoted = new NpgsqlCommandBuilder().QuoteIdentifier(table);
+        var sql = "SELECT COALESCE(md5(string_agg(row_to_json(t)::text, '' ORDER BY row_to_json(t)::text)), 'empty') FROM public." + quoted + " t";
+        await using var sourceCommand = new NpgsqlCommand(sql, original);
+        await using var restoredCommand = new NpgsqlCommand(sql, restored);
+        Check(Equals(await sourceCommand.ExecuteScalarAsync(), await restoredCommand.ExecuteScalarAsync()), "Restored table matches all original rows: " + table);
+    }
+    var invalidConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+        ["ConnectionStrings:DefaultConnection"] = "Host=aws-0-test.pooler.supabase.com;Port=6543;Database=postgres;Username=test"
+    }).Build();
+    await Reject<PharmacyValidationException>(() => new DatabaseBackupService(invalidConfiguration,
+        NullLogger<DatabaseBackupService>.Instance).ExportAsync(CancellationToken.None), "Backup rejects the Supabase transaction pooler before connecting");
+}
+finally
+{
+    if (File.Exists(backupPath))
+    {
+        File.Delete(backupPath);
+    }
+    if (File.Exists(restoreListPath))
+    {
+        File.Delete(restoreListPath);
+    }
+}
 Console.WriteLine($"All {checks} PostgreSQL integration checks passed. Isolated database: {databaseName}");
 Directory.CreateDirectory("artifacts/InventoryTests");
 await File.WriteAllTextAsync("artifacts/InventoryTests/session.json", System.Text.Json.JsonSerializer.Serialize(new { databaseName, userId, productId, batchId }));

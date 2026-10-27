@@ -1,0 +1,56 @@
+APPLICATION DATABASE BACKUP
+
+Admin: open "Sao luu du lieu" in the sidebar, then create/download a backup.
+The .dump file contains schema public (structure and data) in one consistent
+PostgreSQL snapshot. It includes application users/password hashes and customer
+data. Store privately and keep multiple dated copies off the API server.
+It does not include Supabase Auth/Storage schemas, Storage file contents,
+global roles, API configuration or credentials. This is an application backup,
+not a full Supabase project clone. No restore endpoint is exposed.
+
+SERVER CONFIGURATION
+
+Both API Dockerfiles install PostgreSQL client 18. No NuGet package or database
+schema change is needed. For non-Docker hosts install pg_dump 18 and put it on
+PATH, or configure Backup__PgDumpPath with its absolute executable path.
+pg_dump must be at least the server's major version.
+
+By default the exporter uses ConnectionStrings__DefaultConnection.
+If this uses Supabase Transaction pooler (port 6543), set the environment variable
+ConnectionStrings__BackupConnection to the Session pooler connection from the
+Supabase Connect panel (port 5432), in Npgsql format:
+
+Host=YOUR_SESSION_POOLER_HOST;Port=5432;Database=postgres;Username=postgres.YOUR_PROJECT_REF;Password=YOUR_DB_PASSWORD;SSL Mode=Require
+
+Direct connections also work when the host has network/IPv6 connectivity.
+Use a role with SELECT access to all public tables and their sequences.
+Never commit a real connection string. Credentials stay in the child process
+environment, never in download contents or command arguments.
+Only one export can be generated at a time per API process, with a 3-minute
+timeout. Failed, canceled and completed temporary files are deleted.
+
+RESTORE CHECK (NEW EMPTY DATABASE ONLY)
+
+Use pg_restore 18 or a compatible newer version. Set PGHOST, PGPORT, PGUSER,
+PGDATABASE and the password via a protected password file or local environment.
+Create a separate, empty target database first. It already has schema public.
+Generate an archive inventory:
+
+pg_restore --list pharmacy-public-TIMESTAMP.dump > restore.list
+
+In restore.list, remove ONLY the entry with type "SCHEMA - public" (not TABLE,
+SEQUENCE or other entries). This skips re-creating the existing empty schema.
+Then run:
+
+pg_restore --exit-on-error --no-owner --no-acl --use-list restore.list --dbname NEW_EMPTY_DATABASE pharmacy-public-TIMESTAMP.dump
+
+Check migration history, order totals, stock by lot and user login before
+pointing the application at that database. Restore only trusted archives.
+Do not use --clean on the active database.
+
+LOCAL VERIFICATION
+
+tests/Pharmacy.Checks/run.ps1 starts a fresh loopback-only PostgreSQL cluster,
+tests inventory/orders, exports an archive with the real service, restores it
+into another new database, and compares all public-table contents. It stops
+the test server afterward. It never loads the application connection settings.

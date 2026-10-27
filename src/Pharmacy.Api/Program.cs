@@ -49,6 +49,7 @@ builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IShiftService, ShiftService>();
 builder.Services.AddScoped<IInventoryService, InventoryService>();
+builder.Services.AddSingleton<IDatabaseBackupService, DatabaseBackupService>();
 
 // Configure JWT Authentication
 var jwt = JwtSettings.Read(builder.Configuration);
