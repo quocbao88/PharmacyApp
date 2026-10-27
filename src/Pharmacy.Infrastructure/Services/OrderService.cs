@@ -15,7 +15,7 @@ using Pharmacy.Infrastructure.Data;
 
 namespace Pharmacy.Infrastructure.Services
 {
-    public class OrderService : IOrderService
+    public partial class OrderService : IOrderService
     {
         #region Main logic
 
@@ -55,6 +55,21 @@ namespace Pharmacy.Infrastructure.Services
             using var transaction = await _context.Database.BeginTransactionAsync();
             try
             {
+                var requestHash = HashRequest(request);
+                if (request.RequestId.HasValue)
+                {
+                    await LockRequestAsync(request.RequestId.Value);
+                    var existing = await ReadOrders().FirstOrDefaultAsync(x => x.RequestId == request.RequestId);
+                    if (existing != null)
+                    {
+                        if (existing.UserId != userId || existing.RequestHash != requestHash)
+                        {
+                            throw new PharmacyValidationException("Mã thanh toán đã được dùng cho nội dung khác.");
+                        }
+                        return await MapToDtoAsync(existing);
+                    }
+                }
+
                 var productIds = request.Items.Select(i => i.ProductId).Distinct().ToList();
 
                 // Pessimistic locking (SELECT FOR UPDATE) to prevent concurrent stock deduction
@@ -91,6 +106,8 @@ namespace Pharmacy.Infrastructure.Services
                     Id = Guid.NewGuid(),
                     OrderCode = orderCode,
                     UserId = userId,
+                    RequestId = request.RequestId,
+                    RequestHash = requestHash,
                     CustomerId = request.CustomerId,
                     Customer = customer,
                     // Khách vãng lai
@@ -117,6 +134,12 @@ namespace Pharmacy.Infrastructure.Services
                 }
 
                 await _orderRepository.AddAsync(order);
+                foreach (var detail in order.Details)
+                {
+                    AddMovement(order, detail, "Sale", -checked(detail.Quantity * detail.ConversionValue),
+                        detail.Quantity * detail.CostPrice, Pharmacy.Core.Rules.OrderAmounts.NetLine(order, detail),
+                        userId, "Bán hàng");
+                }
                 await _orderRepository.SaveChangesAsync();
                 await transaction.CommitAsync();
 
@@ -238,6 +261,7 @@ namespace Pharmacy.Infrastructure.Services
             }
 
             var orders = await _context.Orders
+                .Include(o => o.Returns).ThenInclude(x => x.Details)
                 .Include(o => o.User)
                 .Include(o => o.Customer)
                 .Include(o => o.Details)
@@ -258,12 +282,19 @@ namespace Pharmacy.Infrastructure.Services
 
         public async Task<List<OrderDto>> GetOrdersAsync(DateTime? startDate, DateTime? endDate)
         {
+            if (startDate.HasValue && startDate.Value.Date == DateTime.MinValue.Date
+                || endDate.HasValue && (endDate.Value.Date == DateTime.MinValue.Date || endDate.Value.Date == DateTime.MaxValue.Date))
+            {
+                throw new PharmacyValidationException("Khoảng ngày không hợp lệ.");
+            }
+
             if (startDate.HasValue && endDate.HasValue && startDate.Value.Date > endDate.Value.Date)
             {
                 throw new PharmacyValidationException("Ngày bắt đầu không được sau ngày kết thúc.");
             }
 
             var query = _context.Orders
+                .Include(o => o.Returns).ThenInclude(x => x.Details)
                 .Include(o => o.User)
                 .Include(o => o.Customer)
                 .Include(o => o.Details)
@@ -275,17 +306,15 @@ namespace Pharmacy.Infrastructure.Services
             if (startDate.HasValue)
             {
                 // Set to start of the day in local time/specified kind, then to UTC
-                var startOfDay = new DateTime(startDate.Value.Year, startDate.Value.Month, startDate.Value.Day, 0, 0, 0, 0, startDate.Value.Kind);
-                var startUtc = startOfDay.ToUniversalTime();
+                var startUtc = BusinessDate.Start(startDate.Value);
                 query = query.Where(o => o.CreatedAt >= startUtc);
             }
 
             if (endDate.HasValue)
             {
                 // Set to end of the day (23:59:59.999) in local time/specified kind, then to UTC
-                var endOfDay = new DateTime(endDate.Value.Year, endDate.Value.Month, endDate.Value.Day, 23, 59, 59, 999, endDate.Value.Kind);
-                var endUtc = endOfDay.ToUniversalTime();
-                query = query.Where(o => o.CreatedAt <= endUtc);
+                var endUtc = BusinessDate.Start(endDate.Value.AddDays(1));
+                query = query.Where(o => o.CreatedAt < endUtc);
             }
 
             var orders = await query.OrderByDescending(o => o.CreatedAt).ToListAsync();
@@ -295,70 +324,6 @@ namespace Pharmacy.Infrastructure.Services
                 dtos.Add(await MapToDtoAsync(o));
             }
             return dtos;
-        }
-
-        public async Task CancelOrderAsync(Guid orderId)
-        {
-            _logger.LogInformation("Bắt đầu thực hiện hủy đơn hàng ID: {OrderId}", orderId);
-            using var transaction = await _context.Database.BeginTransactionAsync();
-            try
-            {
-                // Lock the order before checking status so two cancellations cannot restore it twice.
-                await _context.Database.ExecuteSqlInterpolatedAsync(
-                    $"SELECT id FROM orders WHERE id = {orderId} FOR UPDATE");
-
-                var order = await _context.Orders
-                    .Include(o => o.Details)
-                    .FirstOrDefaultAsync(o => o.Id == orderId);
-
-                if (order == null)
-                {
-                    throw new PharmacyValidationException("Không tìm thấy đơn hàng cần hủy.");
-                }
-
-                if (order.Status == "Cancelled")
-                {
-                    throw new PharmacyValidationException("Đơn hàng này đã được hủy trước đó.");
-                }
-
-                // Use the same batch lock order as checkout, including unavailable batches.
-                var productIds = order.Details.Select(d => d.ProductId).Distinct();
-                var batches = await _productRepository.GetBatchesForUpdateAsync(productIds, includeUnavailable: true);
-                var batchMap = batches.ToDictionary(b => b.Id);
-                var customer = await ReadCustomerAsync(order.CustomerId);
-
-                // 1. Restore product batches stock.
-                foreach (var detail in order.Details)
-                {
-                    if (!batchMap.TryGetValue(detail.BatchId, out var batch))
-                    {
-                        throw new PharmacyValidationException("Không tìm thấy lô hàng cần hoàn kho.");
-                    }
-
-                    var basicQtyToRestore = checked(detail.Quantity * detail.ConversionValue);
-                    batch.CurrentQuantity = checked(batch.CurrentQuantity + basicQtyToRestore);
-                }
-
-                // 2. Revert CRM reward points (10k = 1 point)
-                if (customer != null)
-                {
-                    var pointsEarned = (int)(order.TotalAmount / 10000);
-                    customer.RewardPoints = Math.Max(0, customer.RewardPoints - pointsEarned);
-                }
-
-                // 3. Mark order status as Cancelled
-                order.Status = "Cancelled";
-
-                await _context.SaveChangesAsync();
-                await transaction.CommitAsync();
-                _logger.LogInformation("Hủy đơn hàng {OrderCode} THÀNH CÔNG và đã hoàn lại kho thuốc.", order.OrderCode);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Lỗi khi hủy đơn hàng ID: {OrderId} - Thực hiện ROLLBACK.", orderId);
-                await transaction.RollbackAsync();
-                throw;
-            }
         }
 
         #endregion
@@ -441,7 +406,7 @@ namespace Pharmacy.Infrastructure.Services
             var totalBasicQuantity = item.Quantity * conversionValue;
             var batches = lockedBatches
                 .Where(b => b.ProductId == product.Id && b.CurrentQuantity > 0 &&
-                    b.ExpirationDate >= DateTime.UtcNow.Date)
+                    b.ExpirationDate >= DateTime.SpecifyKind(BusinessDate.Today, DateTimeKind.Utc))
                 .OrderBy(b => b.ExpirationDate)
                 .ThenBy(b => b.Id)
                 .ToList();
@@ -473,7 +438,7 @@ namespace Pharmacy.Infrastructure.Services
                     Batch = batch,
                     Quantity = quantity,
                     UnitPrice = decimal.Round(unitPrice / conversionValue, 2, MidpointRounding.AwayFromZero),
-                    CostPrice = product.ImportPrice,
+                    CostPrice = batch.UnitCost,
                     SoldUnit = product.Unit,
                     ConversionValue = 1
                 };
@@ -482,7 +447,7 @@ namespace Pharmacy.Infrastructure.Services
                 {
                     detail.Quantity = item.Quantity;
                     detail.UnitPrice = unitPrice;
-                    detail.CostPrice = product.ImportPrice * conversionValue;
+                    detail.CostPrice = batch.UnitCost * conversionValue;
                     detail.SoldUnit = soldUnit;
                     detail.ConversionValue = conversionValue;
                 }
@@ -525,6 +490,22 @@ namespace Pharmacy.Infrastructure.Services
                 DiscountAmount = order.DiscountAmount,
                 PaymentMethod = order.PaymentMethod,
                 Status = order.Status,
+                RefundedAmount = order.RefundedAmount,
+                CancellationReason = order.CancellationReason,
+                CancelledAt = order.CancelledAt,
+                Returns = order.Returns.OrderByDescending(x => x.CreatedAt).Select(x => new OrderReturnDto
+                {
+                    CreatedAt = x.CreatedAt,
+                    Reason = x.Reason,
+                    RefundAmount = x.RefundAmount,
+                    Details = x.Details.Select(d => new OrderReturnItemDto
+                    {
+                        OrderDetailId = d.OrderDetailId,
+                        Quantity = d.Quantity,
+                        Restock = d.Restock,
+                        RefundAmount = d.RefundAmount
+                    }).ToList()
+                }).ToList(),
                 NationalSyncStatus = order.NationalSyncStatus,
                 NationalSyncMessage = order.NationalSyncMessage,
                 NationalSyncedAt = order.NationalSyncedAt,
@@ -541,6 +522,8 @@ namespace Pharmacy.Infrastructure.Services
                     BatchId = d.BatchId,
                     BatchNumber = d.Batch?.BatchNumber ?? "Lô",
                     Quantity = d.Quantity,
+                    ReturnedQuantity = d.ReturnedQuantity,
+                    RestockedQuantity = d.RestockedQuantity,
                     UnitPrice = d.UnitPrice,
                     CostPrice = d.CostPrice,
                     Subtotal = d.Subtotal,

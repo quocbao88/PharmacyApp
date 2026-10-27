@@ -16,10 +16,12 @@ namespace Pharmacy.Api.Controllers
     public class ProductsController : ControllerBase
     {
         private readonly IProductRepository _productRepository;
+        private readonly IInventoryService _inventory;
 
-        public ProductsController(IProductRepository productRepository)
+        public ProductsController(IProductRepository productRepository, IInventoryService inventory)
         {
             _productRepository = productRepository;
+            _inventory = inventory;
         }
 
         [HttpGet]
@@ -108,6 +110,10 @@ namespace Pharmacy.Api.Controllers
         {
             var product = await _productRepository.GetByIdAsync(id);
             if (product == null) return NotFound(new { error = "Không tìm thấy sản phẩm." });
+            if (product.Batches.Any() && !string.Equals(product.Unit, request.Unit, StringComparison.OrdinalIgnoreCase))
+            {
+                return BadRequest(new { error = "Thuốc đã có lô không đổi đơn vị cơ bản vì sẽ sai số lượng lịch sử. Có thể thêm đơn vị quy đổi." });
+            }
 
             var detailsList = new List<string>();
             if (product.Name != request.Name) detailsList.Add($"Tên: '{product.Name}' -> '{request.Name}'");
@@ -191,6 +197,11 @@ namespace Pharmacy.Api.Controllers
             var product = await _productRepository.GetByIdAsync(id);
             if (product == null) return NotFound(new { error = "Không tìm thấy sản phẩm." });
 
+            if (product.Batches.Any())
+            {
+                return BadRequest(new { error = "Thuốc đã có lô hàng phải được giữ lại để đối soát lịch sử kho." });
+            }
+
             _productRepository.Delete(product);
 
             // Log audit
@@ -216,46 +227,12 @@ namespace Pharmacy.Api.Controllers
         [HttpPost("{id}/batches")]
         public async Task<IActionResult> AddBatch(Guid id, [FromBody] CreateBatchRequest request)
         {
-            var product = await _productRepository.GetByIdAsync(id);
-            if (product == null) return NotFound(new { error = "Không tìm thấy sản phẩm." });
-
-            var batch = new ProductBatch
+            var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!Guid.TryParse(userId, out var actor))
             {
-                Id = Guid.NewGuid(),
-                ProductId = id,
-                BatchNumber = request.BatchNumber,
-                ExpirationDate = request.ExpirationDate.ToUniversalTime(),
-                CurrentQuantity = request.Quantity,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            await _productRepository.AddBatchAsync(batch);
-
-            // Log audit
-            var userFullName = User.Identity?.Name ?? "Hệ thống";
-            var auditLog = new ProductAuditLog
-            {
-                Id = Guid.NewGuid(),
-                ProductId = id,
-                ProductName = product.Name,
-                Action = "Nhập lô",
-                ChangedBy = userFullName,
-                ChangedAt = DateTime.UtcNow,
-                Details = $"Nhập lô mới: {request.BatchNumber}, Số lượng: {request.Quantity}, Hạn dùng: {request.ExpirationDate:dd/MM/yyyy}."
-            };
-            await _productRepository.AddAuditLogAsync(auditLog);
-
-            await _productRepository.SaveChangesAsync();
-
-            return Ok(new BatchDto
-            {
-                Id = batch.Id,
-                ProductId = batch.ProductId,
-                ProductName = product.Name,
-                BatchNumber = batch.BatchNumber,
-                ExpirationDate = batch.ExpirationDate,
-                CurrentQuantity = batch.CurrentQuantity
-            });
+                throw new UnauthorizedAccessException();
+            }
+            return Ok(await _inventory.ReceiveAsync(id, request, actor));
         }
 
         [HttpGet("batches/{productId}")]
@@ -271,7 +248,8 @@ namespace Pharmacy.Api.Controllers
                 ProductName = product.Name,
                 BatchNumber = b.BatchNumber,
                 ExpirationDate = b.ExpirationDate,
-                CurrentQuantity = b.CurrentQuantity
+                CurrentQuantity = b.CurrentQuantity,
+                ImportPrice = b.UnitCost
             }).OrderBy(b => b.ExpirationDate).ToList();
 
             return Ok(batches);
@@ -281,72 +259,16 @@ namespace Pharmacy.Api.Controllers
         [HttpPut("batches/{batchId}")]
         public async Task<IActionResult> UpdateBatch(Guid batchId, [FromBody] UpdateBatchRequest request)
         {
-            var batch = await _productRepository.GetBatchByIdAsync(batchId);
-            if (batch == null) return NotFound(new { error = "Không tìm thấy lô hàng." });
-
-            var oldNumber = batch.BatchNumber;
-            var oldQty = batch.CurrentQuantity;
-            var oldExp = batch.ExpirationDate;
-
-            batch.BatchNumber = request.BatchNumber;
-            batch.ExpirationDate = request.ExpirationDate.ToUniversalTime();
-            batch.CurrentQuantity = request.CurrentQuantity;
-
-            _productRepository.UpdateBatch(batch);
-
-            // Log audit
-            var userFullName = User.Identity?.Name ?? "Hệ thống";
-            var auditLog = new ProductAuditLog
-            {
-                Id = Guid.NewGuid(),
-                ProductId = batch.ProductId,
-                ProductName = batch.Product?.Name ?? "Sản phẩm",
-                Action = "Cập nhật lô",
-                ChangedBy = userFullName,
-                ChangedAt = DateTime.UtcNow,
-                Details = $"Cập nhật lô {oldNumber} -> {request.BatchNumber}. Số lượng: {oldQty} -> {request.CurrentQuantity}. Hạn dùng: {oldExp:dd/MM/yyyy} -> {request.ExpirationDate:dd/MM/yyyy}."
-            };
-            await _productRepository.AddAuditLogAsync(auditLog);
-
-            await _productRepository.SaveChangesAsync();
-
-            return Ok(new BatchDto
-            {
-                Id = batch.Id,
-                ProductId = batch.ProductId,
-                ProductName = batch.Product?.Name,
-                BatchNumber = batch.BatchNumber,
-                ExpirationDate = batch.ExpirationDate,
-                CurrentQuantity = batch.CurrentQuantity
-            });
+            await Task.CompletedTask;
+            return BadRequest(new { error = "Lô đã ghi nhận không sửa trực tiếp. Hãy dùng Điều chỉnh tồn và nhập lý do; nhập thêm hàng qua Nhập lô." });
         }
 
         [Authorize(Roles = "Admin")]
         [HttpDelete("batches/{batchId}")]
         public async Task<IActionResult> DeleteBatch(Guid batchId)
         {
-            var batch = await _productRepository.GetBatchByIdAsync(batchId);
-            if (batch == null) return NotFound(new { error = "Không tìm thấy lô hàng." });
-
-            _productRepository.DeleteBatch(batch);
-
-            // Log audit
-            var userFullName = User.Identity?.Name ?? "Hệ thống";
-            var auditLog = new ProductAuditLog
-            {
-                Id = Guid.NewGuid(),
-                ProductId = batch.ProductId,
-                ProductName = batch.Product?.Name ?? "Sản phẩm",
-                Action = "Xóa lô",
-                ChangedBy = userFullName,
-                ChangedAt = DateTime.UtcNow,
-                Details = $"Xóa lô: {batch.BatchNumber}, Số lượng còn lại khi xóa: {batch.CurrentQuantity}."
-            };
-            await _productRepository.AddAuditLogAsync(auditLog);
-
-            await _productRepository.SaveChangesAsync();
-
-            return NoContent();
+            await Task.CompletedTask;
+            return BadRequest(new { error = "Không xóa lịch sử lô hàng. Hãy điều chỉnh tồn về 0 và ghi lý do hàng hỏng/hết hạn." });
         }
 
         [HttpGet("{id}/history")]
@@ -381,7 +303,7 @@ namespace Pharmacy.Api.Controllers
                 {
                     ProductId = p.Id,
                     ProductName = p.Name,
-                    CurrentStock = p.Batches.Sum(b => b.CurrentQuantity),
+                    CurrentStock = p.Batches.Where(b => b.ExpirationDate >= DateTime.SpecifyKind(DateTime.UtcNow.AddHours(7).Date, DateTimeKind.Utc)).Sum(b => b.CurrentQuantity),
                     MinStockLevel = p.MinStockLevel,
                     Unit = p.Unit
                 }).ToList(),
@@ -418,13 +340,15 @@ namespace Pharmacy.Api.Controllers
             MinStockLevel = p.MinStockLevel,
             TotalStock = p.Batches.Sum(b => b.CurrentQuantity),
             UpdatedAt = p.UpdatedAt,
+            AvailableStock = p.Batches.Where(b => b.ExpirationDate >= DateTime.SpecifyKind(DateTime.UtcNow.AddHours(7).Date, DateTimeKind.Utc)).Sum(b => b.CurrentQuantity),
             Batches = p.Batches.Select(b => new BatchDto
             {
                 Id = b.Id,
                 ProductId = b.ProductId,
                 BatchNumber = b.BatchNumber,
                 ExpirationDate = b.ExpirationDate,
-                CurrentQuantity = b.CurrentQuantity
+                CurrentQuantity = b.CurrentQuantity,
+                ImportPrice = b.UnitCost
             }).ToList(),
             UnitConversions = p.UnitConversions.Select(uc => new ProductUnitConversionDto
             {

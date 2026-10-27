@@ -23,10 +23,53 @@ namespace Pharmacy.Infrastructure.Data
         public DbSet<OrderDetail> OrderDetails => Set<OrderDetail>();
         public DbSet<ProductUnitConversion> ProductUnitConversions => Set<ProductUnitConversion>();
         public DbSet<ProductAuditLog> ProductAuditLogs => Set<ProductAuditLog>();
+        public DbSet<StockMovement> StockMovements => Set<StockMovement>();
+        public DbSet<OrderReturn> OrderReturns => Set<OrderReturn>();
+        public DbSet<OrderReturnDetail> OrderReturnDetails => Set<OrderReturnDetail>();
 
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
+
+            modelBuilder.Entity<StockMovement>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+                entity.HasIndex(x => new { x.BatchId, x.CreatedAt });
+                entity.HasIndex(x => x.RequestId).IsUnique();
+                entity.Property(x => x.RequestHash).HasMaxLength(64);
+                entity.Property(x => x.Type).HasMaxLength(30);
+                entity.Property(x => x.Reference).HasMaxLength(100);
+                entity.Property(x => x.Reason).HasMaxLength(500);
+                entity.Property(x => x.StockValue).HasPrecision(18, 2);
+                entity.Property(x => x.CostAmount).HasPrecision(18, 2);
+                entity.Property(x => x.RevenueAmount).HasPrecision(18, 2);
+                entity.HasOne(x => x.Batch).WithMany().HasForeignKey(x => x.BatchId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(x => x.OrderDetail).WithMany().HasForeignKey(x => x.OrderDetailId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<OrderReturn>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+                entity.HasIndex(x => x.RequestId).IsUnique();
+                entity.Property(x => x.RequestHash).HasMaxLength(64);
+                entity.Property(x => x.Reason).HasMaxLength(500);
+                entity.Property(x => x.RefundAmount).HasPrecision(18, 2);
+                entity.HasOne(x => x.Order).WithMany(x => x.Returns).HasForeignKey(x => x.OrderId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<OrderReturnDetail>(entity =>
+            {
+                entity.HasKey(x => x.Id);
+                entity.Property(x => x.RefundAmount).HasPrecision(18, 2);
+                entity.HasOne(x => x.OrderReturn).WithMany(x => x.Details).HasForeignKey(x => x.OrderReturnId).OnDelete(DeleteBehavior.Restrict);
+                entity.HasOne(x => x.OrderDetail).WithMany().HasForeignKey(x => x.OrderDetailId).OnDelete(DeleteBehavior.Restrict);
+            });
+
+            modelBuilder.Entity<Order>().HasIndex(x => x.RequestId).IsUnique();
+            modelBuilder.Entity<Order>().Property(x => x.RequestHash).HasMaxLength(64);
+            modelBuilder.Entity<Order>().Property(x => x.CancellationReason).HasMaxLength(500);
+            modelBuilder.Entity<Order>().Property(x => x.RefundedAmount).HasPrecision(18, 2);
+            modelBuilder.Entity<ProductBatch>().Property(x => x.UnitCost).HasPrecision(18, 2);
 
             // 10. ProductAuditLog configuration
             modelBuilder.Entity<ProductAuditLog>(entity =>

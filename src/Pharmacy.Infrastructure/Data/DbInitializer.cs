@@ -153,6 +153,25 @@ namespace Pharmacy.Infrastructure.Data
                 await context.Customers.AddRangeAsync(c1, c2);
             }
 
+            // Fresh installations also need an explicit opening stock event for seeded lots.
+            foreach (var entry in context.ChangeTracker.Entries<ProductBatch>()
+                .Where(x => x.State == Microsoft.EntityFrameworkCore.EntityState.Added).ToList())
+            {
+                var batch = entry.Entity;
+                var product = context.Products.Local.First(x => x.Id == batch.ProductId);
+                batch.UnitCost = product.ImportPrice;
+                context.StockMovements.Add(new StockMovement
+                {
+                    Id = Guid.NewGuid(),
+                    BatchId = batch.Id,
+                    Type = "Opening",
+                    Quantity = batch.CurrentQuantity,
+                    StockValue = batch.CurrentQuantity * batch.UnitCost,
+                    Reference = "SO-DU-KHOI-TAO",
+                    Reason = "Số dư khởi tạo; cần kiểm kê thực tế"
+                });
+            }
+
             await context.SaveChangesAsync();
         }
 

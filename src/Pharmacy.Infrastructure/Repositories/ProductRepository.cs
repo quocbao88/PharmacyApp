@@ -109,13 +109,13 @@ namespace Pharmacy.Infrastructure.Repositories
             // Cancellation must also lock empty and expired batches before restoring stock.
             var parameters = sortedIds.Select((_, index) => $"{{{index}}}").ToArray();
             var inClause = string.Join(", ", parameters);
-            var query = $"SELECT id, product_id, batch_number, expiration_date, current_quantity, created_at FROM product_batches WHERE product_id IN ({inClause})";
+            var query = $"SELECT id, product_id, batch_number, expiration_date, current_quantity, unit_cost, created_at FROM product_batches WHERE product_id IN ({inClause})";
             var paramObjects = sortedIds.Cast<object>().ToList();
 
             if (!includeUnavailable)
             {
                 query += $" AND current_quantity > 0 AND expiration_date >= {{{paramObjects.Count}}}";
-                paramObjects.Add(DateTime.UtcNow.Date);
+                paramObjects.Add(DateTime.SpecifyKind(BusinessDate.Today, DateTimeKind.Utc));
             }
 
             query += " ORDER BY product_id, expiration_date, id FOR UPDATE";
@@ -127,10 +127,11 @@ namespace Pharmacy.Infrastructure.Repositories
 
         public async Task<List<Product>> GetLowStockProductsAsync()
         {
+            var today = DateTime.SpecifyKind(BusinessDate.Today, DateTimeKind.Utc);
             // Fetch products where the aggregate batch stock is below the minimum required stock level
             return await _context.Products
                 .Include(p => p.Batches)
-                .Where(p => p.Batches.Sum(b => b.CurrentQuantity) < p.MinStockLevel)
+                .Where(p => p.Batches.Where(b => b.ExpirationDate >= today).Sum(b => b.CurrentQuantity) < p.MinStockLevel)
                 .ToListAsync();
         }
 

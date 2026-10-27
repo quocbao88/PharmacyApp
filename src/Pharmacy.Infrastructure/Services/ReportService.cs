@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Pharmacy.Core.DTOs;
 using Pharmacy.Core.Interfaces;
 using Pharmacy.Core.Exceptions;
+using Pharmacy.Infrastructure.Data;
 
 namespace Pharmacy.Infrastructure.Services
 {
@@ -22,8 +23,8 @@ namespace Pharmacy.Infrastructure.Services
             CheckDates(start, end);
 
             // Normalize dates to include full range and specify UTC kind for PostgreSQL compatibility
-            var normalizedStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
-            var normalizedEnd = DateTime.SpecifyKind(end.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+            var normalizedStart = BusinessDate.Start(start);
+            var normalizedEnd = BusinessDate.Start(end.AddDays(1)).AddTicks(-1);
 
             var orders = await _orderRepository.GetOrdersInPeriodAsync(normalizedStart, normalizedEnd);
 
@@ -33,11 +34,11 @@ namespace Pharmacy.Infrastructure.Services
 
             foreach (var order in orders)
             {
-                var orderDate = DateTime.SpecifyKind(order.CreatedAt.Date, DateTimeKind.Utc);
+                var orderDate = DateTime.SpecifyKind(order.CreatedAt.AddHours(7).Date, DateTimeKind.Utc);
                 
-                decimal orderRevenue = order.TotalAmount;
+                decimal orderRevenue = order.TotalAmount - order.RefundedAmount;
                 // Calculate total cost for this order (Sum of d.Quantity * d.CostPrice)
-                decimal orderCost = order.Details.Sum(d => d.Quantity * d.CostPrice);
+                decimal orderCost = order.Details.Sum(d => (d.Quantity - d.RestockedQuantity) * d.CostPrice);
 
                 totalRevenue += orderRevenue;
                 totalCost += orderCost;
@@ -55,7 +56,7 @@ namespace Pharmacy.Infrastructure.Services
 
             // Fill missing days with zero stats (user-friendly chart layout)
             var dailyStatsList = new List<DailyReportItemDto>();
-            for (var date = normalizedStart.Date; date <= normalizedEnd.Date; date = date.AddDays(1))
+            for (var date = start.Date; date <= end.Date; date = date.AddDays(1))
             {
                 var dateUtc = DateTime.SpecifyKind(date, DateTimeKind.Utc);
                 decimal revenue = 0;
@@ -91,8 +92,8 @@ namespace Pharmacy.Infrastructure.Services
                 throw new PharmacyValidationException("Số lượng sản phẩm phải lớn hơn 0.");
             }
 
-            var normalizedStart = DateTime.SpecifyKind(start.Date, DateTimeKind.Utc);
-            var normalizedEnd = DateTime.SpecifyKind(end.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+            var normalizedStart = BusinessDate.Start(start);
+            var normalizedEnd = BusinessDate.Start(end.AddDays(1)).AddTicks(-1);
 
             return await _orderRepository.GetTopSellingProductsAsync(normalizedStart, normalizedEnd, limit);
         }

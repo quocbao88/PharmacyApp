@@ -74,6 +74,19 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("CancellationReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("cancellation_reason");
+
+                    b.Property<DateTime?>("CancelledAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("cancelled_at");
+
+                    b.Property<Guid?>("CancelledBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("cancelled_by");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
@@ -139,6 +152,20 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("text")
                         .HasColumnName("prescription_code");
 
+                    b.Property<decimal>("RefundedAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("refunded_amount");
+
+                    b.Property<string>("RequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<Guid?>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text")
@@ -162,6 +189,10 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.HasIndex("OrderCode")
                         .IsUnique()
                         .HasDatabaseName("ix_orders_order_code");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_orders_request_id");
 
                     b.HasIndex("UserId")
                         .HasDatabaseName("ix_orders_user_id");
@@ -201,6 +232,14 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("quantity");
 
+                    b.Property<int>("RestockedQuantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("restocked_quantity");
+
+                    b.Property<int>("ReturnedQuantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("returned_quantity");
+
                     b.Property<string>("SoldUnit")
                         .HasColumnType("text")
                         .HasColumnName("sold_unit");
@@ -230,6 +269,103 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.ToTable("order_details");
 
                     b.HasCheckConstraint("CK_OrderDetail_Quantity", "quantity > 0");
+                });
+
+            modelBuilder.Entity("Pharmacy.Core.Entities.OrderReturn", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_id");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<decimal>("RefundAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("refund_amount");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<Guid>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<int>("RevokedPoints")
+                        .HasColumnType("integer")
+                        .HasColumnName("revoked_points");
+
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_order_returns");
+
+                    b.HasIndex("OrderId")
+                        .HasDatabaseName("ix_order_returns_order_id");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_order_returns_request_id");
+
+                    b.ToTable("order_returns");
+                });
+
+            modelBuilder.Entity("Pharmacy.Core.Entities.OrderReturnDetail", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("OrderDetailId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_detail_id");
+
+                    b.Property<Guid>("OrderReturnId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_return_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<decimal>("RefundAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("refund_amount");
+
+                    b.Property<bool>("Restock")
+                        .HasColumnType("boolean")
+                        .HasColumnName("restock");
+
+                    b.HasKey("Id")
+                        .HasName("pk_order_return_details");
+
+                    b.HasIndex("OrderDetailId")
+                        .HasDatabaseName("ix_order_return_details_order_detail_id");
+
+                    b.HasIndex("OrderReturnId")
+                        .HasDatabaseName("ix_order_return_details_order_return_id");
+
+                    b.ToTable("order_return_details");
                 });
 
             modelBuilder.Entity("Pharmacy.Core.Entities.Product", b =>
@@ -398,6 +534,11 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("product_id");
 
+                    b.Property<decimal>("UnitCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("unit_cost");
+
                     b.HasKey("Id")
                         .HasName("pk_product_batches");
 
@@ -494,6 +635,91 @@ namespace Pharmacy.Infrastructure.Migrations
                         .HasDatabaseName("ix_shifts_user_id");
 
                     b.ToTable("shifts");
+                });
+
+            modelBuilder.Entity("Pharmacy.Core.Entities.StockMovement", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("BatchId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("batch_id");
+
+                    b.Property<decimal>("CostAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("cost_amount");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("OrderDetailId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("order_detail_id");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("integer")
+                        .HasColumnName("quantity");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("reason");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("reference");
+
+                    b.Property<string>("RequestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("request_hash");
+
+                    b.Property<Guid?>("RequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("request_id");
+
+                    b.Property<decimal>("RevenueAmount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("revenue_amount");
+
+                    b.Property<decimal>("StockValue")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)")
+                        .HasColumnName("stock_value");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("type");
+
+                    b.Property<Guid?>("UserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("user_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_stock_movements");
+
+                    b.HasIndex("OrderDetailId")
+                        .HasDatabaseName("ix_stock_movements_order_detail_id");
+
+                    b.HasIndex("RequestId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_stock_movements_request_id");
+
+                    b.HasIndex("BatchId", "CreatedAt")
+                        .HasDatabaseName("ix_stock_movements_batch_id_created_at");
+
+                    b.ToTable("stock_movements");
                 });
 
             modelBuilder.Entity("Pharmacy.Core.Entities.Supplier", b =>
@@ -629,6 +855,39 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("Product");
                 });
 
+            modelBuilder.Entity("Pharmacy.Core.Entities.OrderReturn", b =>
+                {
+                    b.HasOne("Pharmacy.Core.Entities.Order", "Order")
+                        .WithMany("Returns")
+                        .HasForeignKey("OrderId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_order_returns_orders_order_id");
+
+                    b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("Pharmacy.Core.Entities.OrderReturnDetail", b =>
+                {
+                    b.HasOne("Pharmacy.Core.Entities.OrderDetail", "OrderDetail")
+                        .WithMany()
+                        .HasForeignKey("OrderDetailId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_order_return_details_order_details_order_detail_id");
+
+                    b.HasOne("Pharmacy.Core.Entities.OrderReturn", "OrderReturn")
+                        .WithMany("Details")
+                        .HasForeignKey("OrderReturnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_order_return_details_order_returns_order_return_id");
+
+                    b.Navigation("OrderDetail");
+
+                    b.Navigation("OrderReturn");
+                });
+
             modelBuilder.Entity("Pharmacy.Core.Entities.Product", b =>
                 {
                     b.HasOne("Pharmacy.Core.Entities.Supplier", "Supplier")
@@ -677,7 +936,34 @@ namespace Pharmacy.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("Pharmacy.Core.Entities.StockMovement", b =>
+                {
+                    b.HasOne("Pharmacy.Core.Entities.ProductBatch", "Batch")
+                        .WithMany()
+                        .HasForeignKey("BatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_stock_movements_product_batches_batch_id");
+
+                    b.HasOne("Pharmacy.Core.Entities.OrderDetail", "OrderDetail")
+                        .WithMany()
+                        .HasForeignKey("OrderDetailId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_stock_movements_order_details_order_detail_id");
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("OrderDetail");
+                });
+
             modelBuilder.Entity("Pharmacy.Core.Entities.Order", b =>
+                {
+                    b.Navigation("Details");
+
+                    b.Navigation("Returns");
+                });
+
+            modelBuilder.Entity("Pharmacy.Core.Entities.OrderReturn", b =>
                 {
                     b.Navigation("Details");
                 });

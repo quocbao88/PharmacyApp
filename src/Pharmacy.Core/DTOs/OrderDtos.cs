@@ -6,6 +6,7 @@ namespace Pharmacy.Core.DTOs
 {
     public class CheckoutOrderRequest
     {
+        public Guid? RequestId { get; set; }
         public Guid? CustomerId { get; set; }
         public string? Notes { get; set; }
         [Range(typeof(decimal), "0", "9999999999999999.99")]
@@ -36,6 +37,10 @@ namespace Pharmacy.Core.DTOs
 
     public class OrderDto
     {
+        public decimal RefundedAmount { get; set; }
+        public string? CancellationReason { get; set; }
+        public DateTime? CancelledAt { get; set; }
+        public List<OrderReturnDto> Returns { get; set; } = new();
         public Guid Id { get; set; }
         public required string OrderCode { get; set; }
         public Guid UserId { get; set; }
@@ -68,6 +73,8 @@ namespace Pharmacy.Core.DTOs
 
     public class OrderDetailDto
     {
+        public int ReturnedQuantity { get; set; }
+        public int RestockedQuantity { get; set; }
         public Guid Id { get; set; }
         public Guid ProductId { get; set; }
         public required string ProductName { get; set; }

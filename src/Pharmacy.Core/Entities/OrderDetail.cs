@@ -9,6 +9,8 @@ namespace Pharmacy.Core.Entities
         public Guid ProductId { get; set; }
         public Guid BatchId { get; set; }
         public int Quantity { get; set; }
+        public int ReturnedQuantity { get; set; }
+        public int RestockedQuantity { get; set; }
         public decimal UnitPrice { get; set; } // Giá bán tại thời điểm mua
         public decimal CostPrice { get; set; } // Giá nhập tại thời điểm bán (để tính lợi nhuận)
         public decimal Subtotal { get; set; } // Quantity * UnitPrice

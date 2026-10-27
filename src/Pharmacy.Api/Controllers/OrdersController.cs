@@ -58,10 +58,16 @@ namespace Pharmacy.Api.Controllers
         }
 
         [HttpPost("{id}/cancel")]
-        public async Task<IActionResult> CancelOrder(Guid id)
+        public async Task<IActionResult> CancelOrder(Guid id, [FromBody] CancelOrderRequest request)
         {
-            await _orderService.CancelOrderAsync(id);
+            await _orderService.CancelOrderAsync(id, request.Reason, GetUserId());
             return Ok(new { message = "Hủy đơn hàng thành công và đã hoàn trả tồn kho." });
+        }
+
+        [HttpPost("{id}/returns")]
+        public async Task<IActionResult> ReturnOrder(Guid id, [FromBody] ReturnOrderRequest request)
+        {
+            return Ok(await _orderService.ReturnOrderAsync(id, request, GetUserId()));
         }
 
         private Guid GetUserId()

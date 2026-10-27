@@ -8,6 +8,12 @@ namespace Pharmacy.Core.Entities
         public Guid Id { get; set; }
         public required string OrderCode { get; set; }  // Unique order code
         public Guid UserId { get; set; }                // Nhân viên tạo đơn
+        public Guid? RequestId { get; set; }
+        public string? RequestHash { get; set; }
+        public decimal RefundedAmount { get; set; }
+        public DateTime? CancelledAt { get; set; }
+        public string? CancellationReason { get; set; }
+        public Guid? CancelledBy { get; set; }
         public Guid? CustomerId { get; set; }
         // Khách vãng lai (khi không có CustomerId)
         public string? GuestName { get; set; }           // Tên khách vãng lai
@@ -34,5 +40,6 @@ namespace Pharmacy.Core.Entities
         public User? User { get; set; }
         public Customer? Customer { get; set; }
         public ICollection<OrderDetail> Details { get; set; } = new List<OrderDetail>();
+        public ICollection<OrderReturn> Returns { get; set; } = new List<OrderReturn>();
     }
 }

@@ -48,6 +48,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<IOrderService, OrderService>();
 builder.Services.AddScoped<IReportService, ReportService>();
 builder.Services.AddScoped<IShiftService, ShiftService>();
+builder.Services.AddScoped<IInventoryService, InventoryService>();
 
 // Configure JWT Authentication
 var jwt = JwtSettings.Read(builder.Configuration);
@@ -90,8 +91,9 @@ builder.Services.AddSwaggerGen();
 var app = builder.Build();
 
 // Auto-migrate database on startup (Senior DevOps/DBA Best Practice)
-using (var scope = app.Services.CreateScope())
+if (builder.Configuration.GetValue("Database:InitializeOnStartup", true))
 {
+    using var scope = app.Services.CreateScope();
     var services = scope.ServiceProvider;
     try
     {

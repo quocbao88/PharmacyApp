@@ -9,6 +9,7 @@ namespace Pharmacy.Core.Entities
         public required string BatchNumber { get; set; } // Số lô
         public DateTime ExpirationDate { get; set; } // Hạn sử dụng
         public int CurrentQuantity { get; set; } // Số lượng tồn trong lô
+        public decimal UnitCost { get; set; }
         public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
         // Navigation

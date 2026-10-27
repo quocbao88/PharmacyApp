@@ -69,6 +69,7 @@ namespace Pharmacy.Core.DTOs
         public decimal SellingPrice { get; set; }
         public int MinStockLevel { get; set; }
         public int TotalStock { get; set; }
+        public int AvailableStock { get; set; }
         public DateTime UpdatedAt { get; set; }
         public System.Collections.Generic.List<ProductUnitConversionDto> UnitConversions { get; set; } = new();
         public System.Collections.Generic.List<BatchDto> Batches { get; set; } = new();
@@ -87,6 +88,7 @@ namespace Pharmacy.Core.DTOs
 
     public class CreateBatchRequest
     {
+        public Guid? RequestId { get; set; }
         [Required, MaxLength(100)]
         public required string BatchNumber { get; set; }
         public DateTime ExpirationDate { get; set; }

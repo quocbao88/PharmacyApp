@@ -12,6 +12,7 @@ namespace Pharmacy.Core.Interfaces
         Task<OrderDto> SyncNationalAsync(Guid orderId);
         Task<List<OrderDto>> GetRecentOrdersAsync(int limit);
         Task<List<OrderDto>> GetOrdersAsync(DateTime? startDate, DateTime? endDate);
-        Task CancelOrderAsync(Guid orderId);
+        Task CancelOrderAsync(Guid orderId, string reason, Guid userId);
+        Task<OrderDto> ReturnOrderAsync(Guid orderId, ReturnOrderRequest request, Guid userId);
     }
 }

@@ -22,6 +22,7 @@ namespace Pharmacy.Infrastructure.Repositories
         public async Task<Order?> GetByIdAsync(Guid id)
         {
             return await _context.Orders
+                .Include(o => o.Returns).ThenInclude(x => x.Details)
                 .Include(o => o.User)
                 .Include(o => o.Customer)
                 .Include(o => o.Details)
@@ -83,8 +84,8 @@ namespace Pharmacy.Infrastructure.Repositories
                     ProductId = g.Key.ProductId,
                     ProductName = g.Key.Name,
                     Unit = g.Key.Unit,
-                    TotalQuantitySold = g.Sum(x => x.Quantity * x.ConversionValue),
-                    TotalRevenueGenerated = g.Sum(x => x.Subtotal)
+                    TotalQuantitySold = g.Sum(x => (x.Quantity - x.ReturnedQuantity) * x.ConversionValue),
+                    TotalRevenueGenerated = g.Sum(x => (x.Quantity - x.ReturnedQuantity) * x.UnitPrice)
                 })
                 .OrderByDescending(x => x.TotalQuantitySold)
                 .Take(limit)
